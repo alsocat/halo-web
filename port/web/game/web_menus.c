@@ -5,10 +5,12 @@ The site's changes to the game's menus (ui.map), made in its loaded tag data
 rather than in the map file.
 
 ONLINE PLAY: the multiplayer menu's SYSTEM LINK PLAY is ONLINE PLAY, which
-goes straight to the list of games (ONLINE GAMES) as the site's player: the
+goes straight to the list of games as the site's player: the
 profile last used (else the first), without the four-way profile screens.
 Games are found and joined over the site's network (port/web/shell/net.js),
-and netcode v2 joins games in progress.
+and netcode v2 joins games in progress. The list's title (a picture, SYSTEM
+LINK GAMES) is ONLINE GAMES, spliced from its own letters and EDIT PROFILE
+SETTINGS' O as the game loads it.
 
 DELAY GAME: only the host's pregame screen offers it (X); the host ignores
 the others' (networking/network_server_message_handler.c).
@@ -23,6 +25,7 @@ the map of the menus the changes below are made against.
 */
 
 #include "cseries.h"
+#include "bitmaps/bitmap_group.h"
 #include "cache/cache_files.h"
 #include "game/players.h"
 #include "interface/event_manager.h"
@@ -38,6 +41,7 @@ the map of the menus the changes below are made against.
 #include <string.h>
 
 void platform_log(const char *format, ...);
+void memory_watch_prepare_write(void *address, unsigned long size);
 boolean ui_widget_event_handler_function_invoke(struct widget_instance *widget, struct event_record *event,
 	word function_index, boolean *widget_deleted);
 boolean web_menus_event_function(struct widget_instance *widget, struct event_record *event,
@@ -114,6 +118,7 @@ typedef char web_ui_event_handler_size_check[sizeof(struct web_ui_event_handler)
 typedef char web_ui_child_size_check[sizeof(struct web_ui_child) == 0x50 ? 1 : -1];
 
 static void string_text(long string_list_index, short string_index, char *text, int size);
+static boolean make_online_games_title(void);
 
 /* ---------- the changes */
 
@@ -225,7 +230,12 @@ static void apply_changes(void)
 			set_string((struct string_list_entry *)descriptions->strings.address + index, online_play_description);
 	}
 
-	/* FOUND GAMES (a picture): ONLINE GAMES, in the menus' font */
+	/* SYSTEM LINK GAMES (a picture): ONLINE GAMES, spliced from its letters;
+	else in the menus' font */
+	options->strings.count++;
+	platform_log("web menus: online play");
+	if (make_online_games_title())
+		return;
 	header->type = UI_WIDGET_TYPE_TEXT_BOX;
 	header->background_bitmap.index = NONE;
 	header->text_label_string_list.group_tag = UNICODE_STRING_LIST_TAG;
@@ -239,8 +249,328 @@ static void apply_changes(void)
 	header->text_color.blue = 1.0f;
 	header->horizontal_offset = 13;
 	header->vertical_offset = 30;
-	options->strings.count++;
-	platform_log("web menus: online play");
+}
+
+/* ---------- ONLINE GAMES, the games list's title */
+
+/* The menus' titles are 512x64 DXT3 pictures. SYSTEM LINK GAMES has every
+letter of ONLINE GAMES but the O, which EDIT PROFILE SETTINGS has: the
+letters are laid out again over the title's glow, a dark blue band whose
+ends fade, made the new length. The picture replaces the title's own in the
+texture cache whenever that loads it (web_menus_frame). */
+
+#define TITLE_WIDTH 512
+#define TITLE_HEIGHT 64
+#define TITLE_SIZE (TITLE_WIDTH * TITLE_HEIGHT)
+#define TITLE_FORMAT_DXT3 15
+/* where the titles' letters start, and SYSTEM LINK GAMES' last one ends */
+#define TITLE_TEXT_LEFT 30
+#define FOUND_GAMES_TEXT_RIGHT 366
+#define FOUND_GAMES_BITMAP MULTIPLAYER_SCREEN "connected\\server_list\\header_found_games"
+#define EDIT_PROFILE_BITMAP "ui\\shell\\main_menu\\settings_select\\player_setup\\player_profile_edit\\header_edit_profile_settings"
+
+typedef unsigned char web_rgba[4];
+
+static struct
+{
+	long tag_index;
+	struct bitmap_data *bitmap;
+	/* the two titles read from the map (in the game's file thread) */
+	boolean reading;
+	boolean found_read;
+	boolean profile_read;
+	byte found_data[TITLE_SIZE];
+	byte profile_data[TITLE_SIZE];
+	boolean made;
+	byte pixels[TITLE_SIZE];
+} online_games_title = { NONE };
+
+static void rgb565(unsigned short value, int *color)
+{
+	color[0] = (value >> 11 & 31) * 255 / 31;
+	color[1] = (value >> 5 & 63) * 255 / 63;
+	color[2] = (value & 31) * 255 / 31;
+}
+
+static void dxt3_decode(byte const *data, web_rgba *pixels)
+{
+	int block_y, block_x, index;
+
+	for (block_y = 0; block_y < TITLE_HEIGHT; block_y += 4)
+	{
+		for (block_x = 0; block_x < TITLE_WIDTH; block_x += 4, data += 16)
+		{
+			int palette[4][3];
+			unsigned short color0 = data[8] | data[9] << 8;
+			unsigned short color1 = data[10] | data[11] << 8;
+			unsigned long bits = data[12] | data[13] << 8 | data[14] << 16 | (unsigned long)data[15] << 24;
+			int channel;
+
+			rgb565(color0, palette[0]);
+			rgb565(color1, palette[1]);
+			for (channel = 0; channel < 3; channel++)
+			{
+				palette[2][channel] = (2 * palette[0][channel] + palette[1][channel]) / 3;
+				palette[3][channel] = (palette[0][channel] + 2 * palette[1][channel]) / 3;
+			}
+			for (index = 0; index < 16; index++)
+			{
+				unsigned char *pixel = pixels[(block_y + index / 4) * TITLE_WIDTH + block_x + index % 4];
+				int *color = palette[bits >> (2 * index) & 3];
+
+				pixel[0] = (unsigned char)color[0];
+				pixel[1] = (unsigned char)color[1];
+				pixel[2] = (unsigned char)color[2];
+				pixel[3] = (unsigned char)((data[index / 2] >> (4 * (index & 1)) & 15) * 17);
+			}
+		}
+	}
+}
+
+static unsigned short to_rgb565(unsigned char const *pixel)
+{
+	return (unsigned short)((pixel[0] * 31 + 127) / 255 << 11 | (pixel[1] * 63 + 127) / 255 << 5 | (pixel[2] * 31 + 127) / 255);
+}
+
+static void dxt3_encode(web_rgba const *pixels, byte *data)
+{
+	int block_y, block_x, index, other;
+
+	for (block_y = 0; block_y < TITLE_HEIGHT; block_y += 4)
+	{
+		for (block_x = 0; block_x < TITLE_WIDTH; block_x += 4, data += 16)
+		{
+			unsigned char const *block[16];
+			int palette[4][3];
+			int best = -1, first = 0, second = 0;
+			unsigned short color0, color1;
+			unsigned long bits = 0;
+			int channel;
+
+			for (index = 0; index < 16; index++)
+				block[index] = pixels[(block_y + index / 4) * TITLE_WIDTH + block_x + index % 4];
+			memset(data, 0, 8);
+			for (index = 0; index < 16; index++)
+				data[index / 2] |= (byte)(((block[index][3] * 15 + 127) / 255) << (4 * (index & 1)));
+			/* the colours furthest apart are the ends */
+			for (index = 0; index < 16; index++)
+			{
+				for (other = index + 1; other < 16; other++)
+				{
+					int distance = 0;
+
+					for (channel = 0; channel < 3; channel++)
+						distance += (block[index][channel] - block[other][channel]) * (block[index][channel] - block[other][channel]);
+					if (distance > best)
+					{
+						best = distance;
+						first = index;
+						second = other;
+					}
+				}
+			}
+			color0 = to_rgb565(block[first]);
+			color1 = to_rgb565(block[second]);
+			if (color0 < color1)
+			{
+				unsigned short swap = color0;
+
+				color0 = color1;
+				color1 = swap;
+			}
+			rgb565(color0, palette[0]);
+			rgb565(color1, palette[1]);
+			for (channel = 0; channel < 3; channel++)
+			{
+				palette[2][channel] = (2 * palette[0][channel] + palette[1][channel]) / 3;
+				palette[3][channel] = (palette[0][channel] + 2 * palette[1][channel]) / 3;
+			}
+			for (index = 0; index < 16; index++)
+			{
+				int nearest = 0, nearest_distance = 1 << 30, entry;
+
+				for (entry = 0; entry < 4; entry++)
+				{
+					int distance = 0;
+
+					for (channel = 0; channel < 3; channel++)
+						distance += (block[index][channel] - palette[entry][channel]) * (block[index][channel] - palette[entry][channel]);
+					if (distance < nearest_distance)
+					{
+						nearest_distance = distance;
+						nearest = entry;
+					}
+				}
+				bits |= (unsigned long)nearest << (2 * index);
+			}
+			data[8] = (byte)color0;
+			data[9] = (byte)(color0 >> 8);
+			data[10] = (byte)color1;
+			data[11] = (byte)(color1 >> 8);
+			data[12] = (byte)bits;
+			data[13] = (byte)(bits >> 8);
+			data[14] = (byte)(bits >> 16);
+			data[15] = (byte)(bits >> 24);
+		}
+	}
+}
+
+/* a title's only picture, if it is one as expected */
+static struct bitmap_data *title_bitmap(long tag_index)
+{
+	struct bitmap_group *group;
+	struct bitmap_data *bitmap;
+
+	if (tag_index == NONE)
+		return NULL;
+	group = bitmap_group_get(tag_index);
+	if (group->bitmaps.count != 1)
+		return NULL;
+	bitmap = (struct bitmap_data *)group->bitmaps.address;
+	if (bitmap->width != TITLE_WIDTH || bitmap->height != TITLE_HEIGHT || bitmap->format != TITLE_FORMAT_DXT3 ||
+		bitmap->pixels_size != TITLE_SIZE)
+	{
+		return NULL;
+	}
+	return bitmap;
+}
+
+/* the title's glow (not a letter: a dark blue) */
+static boolean title_letter(unsigned char const *pixel)
+{
+	return pixel[3] && (pixel[0] > 8 || pixel[2] > 80);
+}
+
+/* the titles read for ONLINE GAMES: TRUE when the reads are under way */
+static boolean make_online_games_title(void)
+{
+	long found_index = tag_loaded(BITMAP_GROUP_TAG, FOUND_GAMES_BITMAP);
+	long profile_index = tag_loaded(BITMAP_GROUP_TAG, EDIT_PROFILE_BITMAP);
+	struct bitmap_data *found_bitmap = title_bitmap(found_index);
+	struct bitmap_data *profile_bitmap = title_bitmap(profile_index);
+
+	online_games_title.tag_index = found_index;
+	online_games_title.bitmap = found_bitmap;
+	online_games_title.made = FALSE;
+	online_games_title.reading = FALSE;
+	if (!found_bitmap || !profile_bitmap)
+	{
+		platform_log("web menus: no titles for ONLINE GAMES");
+		return FALSE;
+	}
+	cache_file_read(found_index, found_bitmap->pixels_offset, TITLE_SIZE, online_games_title.found_data,
+		&online_games_title.found_read, TRUE);
+	cache_file_read(profile_index, profile_bitmap->pixels_offset, TITLE_SIZE, online_games_title.profile_data,
+		&online_games_title.profile_read, TRUE);
+	online_games_title.reading = TRUE;
+	return TRUE;
+}
+
+/* ONLINE GAMES, from the titles read */
+static void splice_online_games_title(void)
+{
+	static web_rgba found[TITLE_SIZE];
+	static web_rgba profile[TITLE_SIZE];
+	static web_rgba title[TITLE_SIZE];
+	/* the letters: from which title, its columns, and the space before */
+	static const struct { boolean profile; short left, right, space; } letters[] = {
+		{ TRUE, 158, 177, 0 },		/* O (PROFILE) */
+		{ FALSE, 200, 218, 4 },		/* N (LINK) */
+		{ FALSE, 174, 187, 4 },		/* L */
+		{ FALSE, 191, 194, 3 },		/* I */
+		{ FALSE, 200, 218, 5 },		/* N */
+		{ FALSE, 113, 129, 4 },		/* E (SYSTEM) */
+		{ FALSE, 254, FOUND_GAMES_TEXT_RIGHT, 12 },	/* GAMES */
+	};
+	unsigned char glow[TITLE_HEIGHT];
+	int x, y, letter, right, at;
+
+	dxt3_decode(online_games_title.found_data, found);
+	dxt3_decode(online_games_title.profile_data, profile);
+	/* the glow's band, row by row */
+	for (y = 0; y < TITLE_HEIGHT; y++)
+	{
+		glow[y] = 0;
+		for (x = TITLE_TEXT_LEFT; x <= FOUND_GAMES_TEXT_RIGHT; x++)
+		{
+			unsigned char const *pixel = found[y * TITLE_WIDTH + x];
+
+			if (!title_letter(pixel) && pixel[3] > glow[y])
+				glow[y] = pixel[3];
+		}
+	}
+	/* the text's right end */
+	right = TITLE_TEXT_LEFT - 1;
+	for (letter = 0; letter < (int)NUMBEROF(letters); letter++)
+		right += letters[letter].space + letters[letter].right - letters[letter].left + 1;
+	/* the glow: its left end as it was, the band, its right end moved */
+	for (y = 0; y < TITLE_HEIGHT; y++)
+	{
+		for (x = 0; x < TITLE_WIDTH; x++)
+		{
+			unsigned char *pixel = title[y * TITLE_WIDTH + x];
+			int source = x - right + FOUND_GAMES_TEXT_RIGHT;
+
+			if (x < TITLE_TEXT_LEFT)
+				memcpy(pixel, found[y * TITLE_WIDTH + x], 4);
+			else if (x <= right)
+			{
+				pixel[0] = 0;
+				pixel[1] = 25;
+				pixel[2] = 46;
+				pixel[3] = glow[y];
+			}
+			else if (source < TITLE_WIDTH)
+				memcpy(pixel, found[y * TITLE_WIDTH + source], 4);
+			else
+				memset(pixel, 0, 4);
+		}
+	}
+	/* the letters over it */
+	at = TITLE_TEXT_LEFT;
+	for (letter = 0; letter < (int)NUMBEROF(letters); letter++)
+	{
+		web_rgba const *source = letters[letter].profile ? profile : found;
+
+		at += letters[letter].space;
+		for (x = letters[letter].left - 1; x <= letters[letter].right + 1; x++)
+		{
+			for (y = 0; y < TITLE_HEIGHT; y++)
+			{
+				unsigned char const *pixel = source[y * TITLE_WIDTH + x];
+
+				if (title_letter(pixel))
+					memcpy(title[y * TITLE_WIDTH + at + x - letters[letter].left], pixel, 4);
+			}
+		}
+		at += letters[letter].right - letters[letter].left + 1;
+	}
+	dxt3_encode(title, online_games_title.pixels);
+	online_games_title.made = TRUE;
+}
+
+/* the title's picture as the texture cache has it: ONLINE GAMES */
+static void place_online_games_title(void)
+{
+	struct bitmap_data *bitmap = online_games_title.bitmap;
+
+	if (online_games_title.reading && online_games_title.found_read && online_games_title.profile_read)
+	{
+		online_games_title.reading = FALSE;
+		splice_online_games_title();
+	}
+	if (!online_games_title.made ||
+		tag_loaded(BITMAP_GROUP_TAG, FOUND_GAMES_BITMAP) != online_games_title.tag_index ||
+		title_bitmap(online_games_title.tag_index) != bitmap)
+	{
+		return;
+	}
+	if (bitmap->base_address && memcmp(bitmap->base_address, online_games_title.pixels, TITLE_SIZE))
+	{
+		memcpy(bitmap->base_address, online_games_title.pixels, TITLE_SIZE);
+		/* (uploaded again before it is next drawn) */
+		memory_watch_prepare_write(bitmap->base_address, TITLE_SIZE);
+	}
 }
 
 /* the site's player's profile: the one last used, else the first there is */
@@ -500,6 +830,25 @@ static void dump_widgets(void)
 				platform_log("ui string %s#%d: '%s'", tag_get_name(tag_index), index, text);
 		}
 	}
+	/* the headers' bitmaps: where their pixels are */
+	tag_iterator_new(&iterator, BITMAP_GROUP_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct bitmap_group *group = bitmap_group_get(tag_index);
+		long index;
+
+		if (!strstr(tag_get_name(tag_index), "header"))
+			continue;
+		for (index = 0; index < group->bitmaps.count; index++)
+		{
+			struct bitmap_data *bitmap = (struct bitmap_data *)group->bitmaps.address + index;
+
+			platform_log("ui bitmap %s#%ld: %dx%d type %d format %d flags %x mips %d offset %ld size %ld data %ld/%ld",
+				tag_get_name(tag_index), index, bitmap->width, bitmap->height, bitmap->type, bitmap->format,
+				bitmap->flags, bitmap->mipmap_count, bitmap->pixels_offset, bitmap->pixels_size,
+				group->pixel_data.file_offset, group->pixel_data.size);
+		}
+	}
 	/* the headers' pictures */
 	tag_iterator_new(&iterator, WEB_UI_WIDGET_DEFINITION_TAG);
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
@@ -612,6 +961,7 @@ void web_menus_frame(void)
 		creator_restore();
 		main_screen_shell_load();
 	}
+	place_online_games_title();
 	/* (the ui.map is loaded again on returning from a game) */
 	if (frames++ % 15 == 0)
 		apply_changes();
