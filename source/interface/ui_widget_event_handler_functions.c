@@ -3350,6 +3350,16 @@ boolean ui_widget_event_handler_function_invoke(
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 478,
 		widget != NULL && widget_deleted != NULL,
 		"(widget != NULL) && (widget_deleted != NULL)");
+#ifdef HALO_WEB
+	/* the site's own functions, which its menu changes use (port/web/game/web_menus.c) */
+	if (function_index >= 200 && function_index < 300)
+	{
+		extern boolean web_menus_event_function(struct widget_instance *widget, struct event_record *event,
+			word function_index, boolean *widget_deleted);
+
+		return web_menus_event_function(widget, event, function_index, widget_deleted);
+	}
+#endif
 	if ((short)function_index >= 0 && function_index < 102)
 	{
 		result = event_handler_function_list.functions[(short)function_index](widget, event, widget_deleted);

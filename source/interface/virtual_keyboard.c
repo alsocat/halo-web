@@ -97,6 +97,14 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 
+#ifdef HALO_WEB
+/* the page's text box, for typing on a keyboard (or a phone's) instead of
+picking each letter (port/web/src/web_input.c) */
+void web_text_entry_open(wchar_t const *text, int maximum_length);
+void web_text_entry_close(void);
+int web_text_entry_take(wchar_t *text, int size);
+#endif
+
 /* ---------- constants */
 
 enum
@@ -460,6 +468,9 @@ boolean virtual_keyboard_launch(
 		virtual_keyboard_globals.saved_text[MAXIMUM_VIRTUAL_KEYBOARD_SAVED_TEXT_LENGTH - 1] = L'\0';
 		virtual_keyboard_globals.last_exit_saved_text = FALSE;
 		ui_play_audio_feedback_sound(_ui_audio_feedback_forward);
+#ifdef HALO_WEB
+		web_text_entry_open(text_buffer, virtual_keyboard_globals.buffer_size / (int)sizeof(wchar_t) - 1);
+#endif
 		result = TRUE;
 	}
 
@@ -957,6 +968,33 @@ void virtual_keyboard_render(
 void virtual_keyboard_process(
 	void)
 {
+#ifdef HALO_WEB
+	/* the text typed in the page's box: the keyboard's text, as if DONE was
+	picked (which checks it); the box closed with the keyboard */
+	static boolean was_active;
+
+	if (virtual_keyboard_globals.active)
+	{
+		int taken = web_text_entry_take(virtual_keyboard_globals.text_buffer,
+			virtual_keyboard_globals.buffer_size / (int)sizeof(wchar_t));
+
+		if (taken == 1)
+		{
+			virtual_keyboard_globals.cursor = virtual_keyboard_globals.text_buffer +
+				ustrlen(virtual_keyboard_globals.text_buffer);
+			virtual_keyboard_globals.row = 0;
+			virtual_keyboard_globals.column = 0;
+			virtual_keyboard_select();
+		}
+		else if (taken == 2)
+		{
+			virtual_keyboard_cancel();
+		}
+	}
+	if (was_active && !virtual_keyboard_globals.active)
+		web_text_entry_close();
+	was_active = virtual_keyboard_globals.active;
+#endif
 	if (virtual_keyboard_globals.active)
 		virtual_keyboard_process_internal();
 

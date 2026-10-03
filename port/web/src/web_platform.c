@@ -180,6 +180,9 @@ static void web_frame_timing(double started, double posted, double waited)
 	}
 }
 
+/* port/web/game/web_menus.c */
+void web_menus_frame(void);
+
 void web_present_frame(void)
 {
 	long width, height;
@@ -241,6 +244,7 @@ void web_present_frame(void)
 		if (++frames_shown % 30 == 1)
 			web_post_frame_count(frames_shown);
 	}
+	web_menus_frame();
 #ifdef HALO_WEB_JSPI
 	glFlush();
 	posted = emscripten_get_now();

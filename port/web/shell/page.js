@@ -162,6 +162,14 @@
         canvas.focus();
       }
     },
+    // the game's on-screen keyboard is up: a text box to type in instead
+    // (web_input.c, interface/virtual_keyboard.c)
+    haloTextEntry(text, maximumLength) {
+      textEntry.open(text, maximumLength);
+    },
+    haloTextEntryClose() {
+      textEntry.close();
+    },
     // the network's rings exist (posix_bridge.c)
     haloNetAttach() {
       const pointer = Module._malloc(36);
@@ -173,6 +181,7 @@
     onRuntimeInitialized() {
       tellSize();
       attachGamepads();
+      textEntry.attach();
       showStatus('Starting…');
     },
     onAbort(reason) {
@@ -181,6 +190,61 @@
       report('stopped');
     },
   };
+
+  // the text box: what is typed goes to the game's memory, which takes it
+  // as the on-screen keyboard's text (web_input.c web_text_entry)
+  const textEntry = (() => {
+    const form = document.getElementById('entry');
+    const input = document.getElementById('entry-text');
+    let state = null;
+    let text = null;
+
+    function close() {
+      if (form.classList.contains('hidden')) return;
+      form.classList.add('hidden');
+      input.blur();
+      canvas.focus();
+    }
+    function answer(value) {
+      if (!state) return;
+      if (value !== null) {
+        const length = Math.min(value.length, text.length - 1);
+        for (let index = 0; index < length; index++) text[index] = value.charCodeAt(index);
+        text[length] = 0;
+      }
+      Atomics.store(state, 0, value === null ? 2 : 1);
+      close();
+    }
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      answer(input.value);
+    });
+    // the keys are the box's, not the game's
+    for (const type of ['keydown', 'keyup', 'keypress']) {
+      input.addEventListener(type, (event) => {
+        event.stopPropagation();
+        if (type === 'keydown' && event.key === 'Escape') {
+          event.preventDefault();
+          answer(null);
+        }
+      });
+    }
+    return {
+      attach() {
+        const base = Module._web_text_entry_state();
+        state = new Int32Array(Module.HEAPU8.buffer, base, 1);
+        text = new Uint16Array(Module.HEAPU8.buffer, base + 4, 64);
+      },
+      open(value, maximumLength) {
+        input.maxLength = maximumLength;
+        input.value = value;
+        form.classList.remove('hidden');
+        input.focus();
+        input.select();
+      },
+      close,
+    };
+  })();
 
   // controllers: browsers give them to this thread only, so the page copies
   // each one into the game's memory every frame (port/web/src/web_input.c),

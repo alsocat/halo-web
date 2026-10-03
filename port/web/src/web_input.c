@@ -14,6 +14,7 @@ game's rumble goes back the same way.
 #include <stdint.h>
 
 #include <SDL3/SDL.h>
+#include <emscripten.h>
 #include <emscripten/html5.h>
 
 #include "platform.h"
@@ -48,6 +49,83 @@ static const SDL_GamepadButton standard_buttons[WEB_GAMEPAD_BUTTONS] = {
 	SDL_GAMEPAD_BUTTON_DPAD_RIGHT,
 	SDL_GAMEPAD_BUTTON_GUIDE,
 };
+
+/* ---------- typing: the page's text box for the game's on-screen keyboard
+(interface/virtual_keyboard.c), which the page shows while the keyboard is
+up; typed text comes back here */
+
+#define WEB_TEXT_ENTRY_LENGTH 64
+
+struct web_text_entry
+{
+	/* the page sets it: 1 text typed, 2 cancelled; the game clears it */
+	int state;
+	unsigned short text[WEB_TEXT_ENTRY_LENGTH];
+};
+
+static struct web_text_entry web_text_entry;
+
+EMSCRIPTEN_KEEPALIVE void *web_text_entry_state(void)
+{
+	return &web_text_entry;
+}
+
+EM_JS(void, web_text_entry_post, (const char *text, int maximum_length), {
+	if (text) postMessage({ cmd: 9, handler: 'haloTextEntry', args: [UTF8ToString(text), maximum_length] });
+	else postMessage({ cmd: 9, handler: 'haloTextEntryClose', args: [] });
+});
+
+void web_text_entry_open(unsigned short const *text, int maximum_length)
+{
+	char utf8[WEB_TEXT_ENTRY_LENGTH * 3 + 1];
+	int length = 0;
+
+	__atomic_store_n(&web_text_entry.state, 0, __ATOMIC_SEQ_CST);
+	if (maximum_length > WEB_TEXT_ENTRY_LENGTH - 1)
+		maximum_length = WEB_TEXT_ENTRY_LENGTH - 1;
+	for (; *text && length < (int)sizeof(utf8) - 4; text++)
+	{
+		unsigned short character = *text;
+
+		if (character < 0x80)
+			utf8[length++] = (char)character;
+		else if (character < 0x800)
+		{
+			utf8[length++] = (char)(0xC0 | character >> 6);
+			utf8[length++] = (char)(0x80 | (character & 0x3F));
+		}
+		else
+		{
+			utf8[length++] = (char)(0xE0 | character >> 12);
+			utf8[length++] = (char)(0x80 | (character >> 6 & 0x3F));
+			utf8[length++] = (char)(0x80 | (character & 0x3F));
+		}
+	}
+	utf8[length] = 0;
+	web_text_entry_post(utf8, maximum_length);
+}
+
+void web_text_entry_close(void)
+{
+	web_text_entry_post(NULL, 0);
+}
+
+/* 1 with the typed text (at most size - 1 characters), 2 cancelled, else 0 */
+int web_text_entry_take(unsigned short *text, int size)
+{
+	int state = __atomic_load_n(&web_text_entry.state, __ATOMIC_SEQ_CST);
+	int index;
+
+	if (state == 1)
+	{
+		for (index = 0; index < size - 1 && index < WEB_TEXT_ENTRY_LENGTH - 1 && web_text_entry.text[index]; index++)
+			text[index] = web_text_entry.text[index];
+		text[index] = 0;
+	}
+	if (state)
+		__atomic_store_n(&web_text_entry.state, 0, __ATOMIC_SEQ_CST);
+	return state;
+}
 
 /* the page's view of web_gamepads: its address and layout */
 EMSCRIPTEN_KEEPALIVE void *web_gamepad_state(int *layout)

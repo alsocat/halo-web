@@ -4684,8 +4684,21 @@ void main_screen_shell_load(
 	{
 		attract_mode_reset_timer();
 		ui_widgets_close_all();
+#ifdef HALO_WEB
+		/* the site's first visit: its character creator, then the main menu
+		(port/web/game/web_menus.c) */
+		{
+			extern boolean web_menus_load_first_screen(void);
+
+			if (web_menus_load_first_screen())
+				;
+			else if (!ui_widget_load_by_name_or_tag("ui\\shell\\main_menu\\main_menu", NONE, NULL, NONE, NONE, NONE, NONE))
+				error(_error_silent, "failed to load main screen shell window");
+		}
+#else
 		if (!ui_widget_load_by_name_or_tag("ui\\shell\\main_menu\\main_menu", NONE, NULL, NONE, NONE, NONE, NONE))
 			error(_error_silent, "failed to load main screen shell window");
+#endif
 		if (widget_globals.main_menu_deferred_error_code != NONE)
 		{
 			display_error(widget_globals.main_menu_deferred_error_code, NONE, TRUE, FALSE);

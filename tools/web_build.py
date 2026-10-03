@@ -114,7 +114,7 @@ LINK_FLAGS = [
 
 
 def web_configure_inputs() -> List[Path]:
-    return [Path(__file__), PORT_DIR / "src", PORT_DIR / "shell"]
+    return [Path(__file__), PORT_DIR / "src", PORT_DIR / "game", PORT_DIR / "shell"]
 
 
 def generate_web_build(n: Writer, sln: Any) -> None:
@@ -178,6 +178,9 @@ def generate_web_build(n: Writer, sln: Any) -> None:
     for source in game_sources(config):
         add_object(source, game_cflags)
     for source in sorted(Path(config["game_sources"]).glob("*.c")):
+        add_object(source, game_cflags)
+    # the browser's own units that see the game as its sources do
+    for source in sorted((PORT_DIR / "game").glob("*.c")):
         add_object(source, game_cflags)
 
     platform_dir = Path(config["platform_sources"])
