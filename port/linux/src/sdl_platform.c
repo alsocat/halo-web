@@ -67,6 +67,8 @@ void web_platform_initialize(void);
 BOOL web_display_size(long *width, long *height);
 void web_present_frame(void);
 void web_process_queued_calls(void);
+void web_input_initialize(void);
+void web_input_update(void);
 #endif
 
 BOOL platform_sdl_initialize(void)
@@ -100,6 +102,8 @@ BOOL platform_sdl_initialize(void)
 	}
 	platform_sdl_started = TRUE;
 #ifdef HALO_WEB
+	/* the controllers come from the page (web_input.c) */
+	web_input_initialize();
 	/* the server's maps and the browser's storage, before the game looks
 	for them */
 	web_platform_initialize();
@@ -847,6 +851,7 @@ void platform_pump_events(void)
 	/* the browser's input events, which SDL's callbacks queue for this
 	thread */
 	web_process_queued_calls();
+	web_input_update();
 #endif
 	pthread_mutex_lock(&input_lock);
 	while (SDL_PollEvent(&event))

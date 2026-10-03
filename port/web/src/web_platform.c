@@ -117,19 +117,10 @@ void web_present_frame(void)
 	long width, height;
 	int pending, canvas_width, canvas_height;
 
-	static unsigned long frames;
-	int waits = 0;
-
 	__atomic_add_fetch(&frames_pending, 1, __ATOMIC_SEQ_CST);
 	web_post_frame(&frames_pending);
 	while ((pending = __atomic_load_n(&frames_pending, __ATOMIC_ACQUIRE)) >= 2)
-	{
 		emscripten_futex_wait(&frames_pending, (uint32_t)pending, 100.0);
-		if (++waits == 10)
-			platform_log("DEBUG frame %lu: the page has not shown the last frames (%d pending)", frames, pending);
-	}
-	if (++frames % 300 == 0)
-		platform_log("DEBUG frame %lu", frames);
 	/* the next frame at the page's size */
 	if (web_display_size(&width, &height) &&
 		emscripten_get_canvas_element_size("#canvas", &canvas_width, &canvas_height) == EMSCRIPTEN_RESULT_SUCCESS &&

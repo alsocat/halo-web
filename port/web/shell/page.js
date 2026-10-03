@@ -86,12 +86,68 @@
     },
     onRuntimeInitialized() {
       tellSize();
+      attachGamepads();
       showStatus('Starting…');
     },
     onAbort(reason) {
       showStatus('The game stopped.', String(reason), true);
     },
   };
+
+  // controllers: browsers give them to this thread only, so the page copies
+  // each one into the game's memory every frame (port/web/src/web_input.c),
+  // and plays the game's rumble
+  let gamepads = null;
+
+  function attachGamepads() {
+    const pointer = Module._malloc(32);
+    const base = Module._web_gamepad_state(pointer);
+    const layout = Array.from(new Int32Array(Module.HEAPU8.buffer, pointer, 8));
+    Module._free(pointer);
+    const buffer = Module.HEAPU8.buffer;
+    const [size, connected, axes, buttons, rumbleLow, rumbleHigh, count, buttonCount] = layout;
+    gamepads = { buttonCount, slots: [] };
+    for (let index = 0; index < count; index++) {
+      const at = base + index * size;
+      gamepads.slots.push({
+        ints: new Int32Array(buffer, at, size / 4),
+        connected: connected / 4,
+        rumbleLow: rumbleLow / 4,
+        rumbleHigh: rumbleHigh / 4,
+        axes: new Float32Array(buffer, at + axes, 4),
+        buttons: new Float32Array(buffer, at + buttons, buttonCount),
+        rumbling: false,
+      });
+    }
+    requestAnimationFrame(pollGamepads);
+  }
+
+  function pollGamepads() {
+    requestAnimationFrame(pollGamepads);
+    const list = navigator.getGamepads ? navigator.getGamepads() : [];
+    gamepads.slots.forEach((slot, index) => {
+      const pad = list[index];
+      const usable = !!(pad && pad.connected && pad.buttons.length >= gamepads.buttonCount);
+      if (usable) {
+        for (let axis = 0; axis < 4; axis++) slot.axes[axis] = pad.axes[axis] || 0;
+        for (let button = 0; button < gamepads.buttonCount; button++) {
+          slot.buttons[button] = pad.buttons[button].value || (pad.buttons[button].pressed ? 1 : 0);
+        }
+        const low = Atomics.load(slot.ints, slot.rumbleLow);
+        const high = Atomics.load(slot.ints, slot.rumbleHigh);
+        const actuator = pad.vibrationActuator;
+        if (actuator && (low || high)) {
+          actuator.playEffect('dual-rumble', { duration: 100, strongMagnitude: low / 65535, weakMagnitude: high / 65535 })
+            .catch(() => {});
+          slot.rumbling = true;
+        } else if (actuator && slot.rumbling) {
+          if (actuator.reset) actuator.reset().catch(() => {});
+          slot.rumbling = false;
+        }
+      }
+      Atomics.store(slot.ints, slot.connected, usable ? 1 : 0);
+    });
+  }
 
   new ResizeObserver(tellSize).observe(screen);
   canvas.addEventListener('pointerdown', () => canvas.focus());
