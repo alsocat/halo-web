@@ -39,6 +39,11 @@ taking the mouse and the keyboard for SDL */
   outline: none;
 }
 
+/* the JSPI engine shows its frames on this canvas itself (page.js) */
+#canvas.shown {
+  opacity: 1;
+}
+
 #status {
   position: fixed;
   inset: 0;

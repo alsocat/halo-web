@@ -2052,10 +2052,43 @@ static void configure_sampler(int stage, BOOL mipmapped, BOOL hires)
 	inputs[8] = state[D3DTSS_MAXANISOTROPY];
 	inputs[9] = state[D3DTSS_BORDERCOLOR];
 	inputs[10] = hires;
+#ifdef HALO_WEB
+	/* Each WebGL call costs a message to the browser's GPU process, which on
+	Linux and the Mac is the bottleneck: instead of reconfiguring the stage's
+	sampler (5 to 8 calls) whenever its state changes, which the game does
+	hundreds of times a frame, each distinct state has a sampler of its own,
+	configured once and bound. (After damiantw/halo-ce-web-multiplayer.) */
+	{
+#define WEB_SAMPLER_CACHE 256
+		static struct { DWORD inputs[11]; GLuint sampler; } cache[WEB_SAMPLER_CACHE];
+		static int count;
+		int index;
+
+		(void)configured;
+		(void)configured_valid;
+		for (index = 0; index < count; index++)
+		{
+			if (!memcmp(cache[index].inputs, inputs, sizeof(inputs)))
+			{
+				state_sampler(stage, cache[index].sampler);
+				return;
+			}
+		}
+		if (count < WEB_SAMPLER_CACHE)
+		{
+			glGenSamplers(1, &sampler);
+			memcpy(cache[count].inputs, inputs, sizeof(inputs));
+			cache[count++].sampler = sampler;
+		}
+		/* (more states than expected: the stage's sampler, configured again) */
+		state_sampler(stage, sampler);
+	}
+#else
 	if (configured_valid[stage] && !memcmp(configured[stage], inputs, sizeof(inputs)))
 		return;
 	memcpy(configured[stage], inputs, sizeof(inputs));
 	configured_valid[stage] = TRUE;
+#endif
 
 	if (min_filter == D3DTEXF_POINT)
 		minification = mip_filter == D3DTEXF_NONE ? GL_NEAREST :
@@ -2247,7 +2280,10 @@ static void bind_textures(struct nv2a_pixel_shader_key *key, float texture_scale
 				}
 			}
 			state_texture(stage, gl_target, gl_texture);
+#ifndef HALO_WEB
+			/* (the browser's configure_sampler binds a sampler of its state) */
 			state_sampler(stage, device.samplers[stage]);
+#endif
 			configure_sampler(stage, description.levels > 1, description.hires);
 			if (stage == 0)
 				key->coverage_alpha = description.hires_coverage != FALSE;
@@ -3346,6 +3382,126 @@ static unsigned long stream_packed_stride(const struct vertex_shader_object *dec
 }
 #endif
 
+#ifdef HALO_WEB
+/* Each draw streamed its vertices into a new buffer (stream_upload), so every
+attribute's pointer was set again for every draw: about 1900
+vertexAttribPointer calls a frame in Blood Gulch, each a message to the
+browser's GPU process. Instead each stream has a buffer of its own, which
+each draw gives new storage holding its vertices from vertex 0: the
+attribute pointers (the element's offset in its stream) then stay where they
+are from one draw to the next, and the state cache skips them. The streams
+are uploaded as setup_streams does: colours in ES's byte order, wide
+vertices packed. (After damiantw/halo-ce-web-multiplayer and
+fucktrevor/halo-ce-universal 75ab8fdf, CC0.) */
+static GLuint web_stream_buffers[16];
+
+static void web_setup_streams(unsigned long first, unsigned long count)
+{
+	static unsigned char *scratch;
+	static unsigned long scratch_size;
+	struct vertex_shader_object *declaration = device.vertex_shader;
+	BOOL used[16] = { FALSE };
+	BOOL enabled[XGPU_VERTEX_ATTRIBUTE_COUNT] = { FALSE };
+	unsigned long strides[16];
+	unsigned long index, stream;
+
+	if (!web_stream_buffers[0])
+		glGenBuffers(16, web_stream_buffers);
+	for (index = 0; index < declaration->element_count; index++)
+	{
+		const struct vertex_element *element = &declaration->elements[index];
+
+		if (device.streams[element->stream].data && element->type != D3DVSDT_NONE)
+			used[element->stream] = TRUE;
+	}
+	for (stream = 0; stream < 16; stream++)
+	{
+		unsigned long stride = device.streams[stream].stride;
+		const unsigned char *data;
+		unsigned long bytes, vertex, color_count = 0;
+		unsigned long color_offsets[XGPU_VERTEX_ATTRIBUTE_COUNT];
+		BOOL copied = FALSE;
+
+		if (!used[stream])
+			continue;
+		data = (const unsigned char *)PLATFORM_PHYSICAL_TO_VIRTUAL(device.streams[stream].data) + first * stride;
+		strides[stream] = stride;
+		bytes = stride ? stride * count : 64;
+		for (index = 0; index < declaration->element_count; index++)
+		{
+			const struct vertex_element *element = &declaration->elements[index];
+
+			if (element->stream == stream && element->type == D3DVSDT_D3DCOLOR)
+				color_offsets[color_count++] = element->offset;
+		}
+		if (stride > WEBGL_MAXIMUM_STRIDE || (color_count && stride))
+		{
+			unsigned long packed = stride > WEBGL_MAXIMUM_STRIDE ? stream_packed_stride(declaration, stream, stride) : stride;
+
+			if (scratch_size < packed * count)
+			{
+				free(scratch);
+				scratch_size = packed * count + 65536;
+				scratch = malloc(scratch_size);
+			}
+			if (packed == stride)
+				memcpy(scratch, data, packed * count);
+			else
+				for (vertex = 0; vertex < count; vertex++)
+					memcpy(scratch + vertex * packed, data + vertex * stride, packed);
+			/* ES has no BGRA attributes */
+			for (vertex = 0; vertex < count; vertex++)
+			{
+				for (index = 0; index < color_count; index++)
+				{
+					unsigned char *color = scratch + vertex * packed + color_offsets[index];
+					unsigned char blue = color[0];
+
+					color[0] = color[2];
+					color[2] = blue;
+				}
+			}
+			data = scratch;
+			bytes = packed * count;
+			strides[stream] = packed;
+			copied = TRUE;
+		}
+		(void)copied;
+		state_array_buffer(web_stream_buffers[stream]);
+		glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((bytes + 3) & ~3UL), data, GL_STREAM_DRAW);
+		stats.streamed_bytes += bytes;
+	}
+	for (index = 0; index < declaration->element_count; index++)
+	{
+		const struct vertex_element *element = &declaration->elements[index];
+		GLint size;
+		GLenum type;
+		GLboolean normalized;
+
+		stream = element->stream;
+		if (!device.streams[stream].data || element->type == D3DVSDT_NONE)
+			continue;
+		if (element->type == D3DVSDT_NORMPACKED3)
+		{
+			state_attribute_pointer(element->reg, web_stream_buffers[stream], 1, GL_UNSIGNED_INT, GL_FALSE, TRUE,
+				(GLsizei)strides[stream], element->offset);
+		}
+		else
+		{
+			attribute_format(element, &size, &type, &normalized);
+			state_attribute_pointer(element->reg, web_stream_buffers[stream], size, type, normalized, FALSE,
+				(GLsizei)strides[stream], element->offset);
+		}
+		enabled[element->reg] = TRUE;
+	}
+	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
+	{
+		if (!enabled[index])
+			state_attribute_value(index, declaration->packed_mask & (1UL << index) ? NULL : device.attributes[index]);
+	}
+}
+#endif
+
 static void setup_streams(unsigned long first, unsigned long count)
 {
 	struct vertex_shader_object *declaration = device.vertex_shader;
@@ -3355,6 +3511,10 @@ static void setup_streams(unsigned long first, unsigned long count)
 	BOOL enabled[XGPU_VERTEX_ATTRIBUTE_COUNT] = { FALSE };
 	unsigned long index, total = 0;
 
+#ifdef HALO_WEB
+	web_setup_streams(first, count);
+	return;
+#endif
 	/* the mirror first; then one reservation for everything streamed */
 	for (index = 0; index < declaration->element_count; index++)
 	{

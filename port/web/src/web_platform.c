@@ -103,6 +103,30 @@ BOOL web_display_size(long *width, long *height)
 /* posts the canvas's frame to the page's haloFrame (Emscripten's
 "call handler" message, 9 in libpthread.js), which lowers *pending once it
 has shown it */
+#ifdef HALO_WEB_JSPI
+/* the JSPI engine (halo-jspi.js): the game's thread waits for its next
+animation frame, returning to the browser, which shows the canvas then
+(the canvas is the page's own, handed to this thread): no copy of the
+frame, and the frames follow the display's refresh, as vsync would */
+EM_ASYNC_JS(void, web_wait_animation_frame, (void), {
+	await new Promise((resolve) => {
+		if (self.requestAnimationFrame) self.requestAnimationFrame(() => resolve());
+		else setTimeout(resolve, 0);
+	});
+});
+#endif
+
+/* the page's count of frames shown (page.js haloFrames), every 30 frames */
+EM_JS(void, web_post_frame_count, (int frames), {
+	postMessage({ cmd: 9, handler: 'haloFrames', args: [frames] });
+});
+
+/* ?HALO_WEB_PROFILE=1: WebGL calls counted (port/web/shell/pre.js) */
+EM_JS(void, web_profile_frame, (int start), {
+	if (start && self.haloProfileGL) self.haloProfileGL();
+	if (self.haloProfileFrame) self.haloProfileFrame();
+});
+
 EM_JS(void, web_post_frame, (int *pending), {
 	var canvas = GLctx && GLctx.canvas;
 	if (!canvas || !canvas.transferToImageBitmap) {
@@ -112,6 +136,45 @@ EM_JS(void, web_post_frame, (int *pending), {
 	var bitmap = canvas.transferToImageBitmap();
 	postMessage({ cmd: 9, handler: 'haloFrame', args: [bitmap, pending] }, [bitmap]);
 });
+
+/* ?HALO_WEB_TIMING=1: where each frame's time goes, every 5 seconds: the
+game's own work (from the last frame's end to this one's present), taking
+the frame to the page, and waiting for the page to show the last ones */
+static void web_frame_timing(double started, double posted, double waited)
+{
+	static int enabled = -1;
+	static double last_end, window_start, game, post, wait;
+	static unsigned long frames;
+
+	if (enabled < 0)
+	{
+		const char *setting = getenv("HALO_WEB_TIMING");
+
+		enabled = setting && (*setting == '1' || *setting == '2' || *setting == '3');
+	}
+	if (!enabled)
+		return;
+	if (last_end)
+	{
+		game += started - last_end;
+		post += posted - started;
+		wait += waited - posted;
+		frames++;
+	}
+	else
+	{
+		window_start = waited;
+	}
+	last_end = waited;
+	if (waited - window_start >= 5000.0 && frames)
+	{
+		platform_log("frames: %.1f fps; per frame %.2f ms game, %.2f ms to the page, %.2f ms waiting for it",
+			frames * 1000.0 / (waited - window_start), game / frames, post / frames, wait / frames);
+		window_start = waited;
+		game = post = wait = 0.0;
+		frames = 0;
+	}
+}
 
 void web_present_frame(void)
 {
@@ -128,10 +191,83 @@ void web_present_frame(void)
 	glClear(GL_COLOR_BUFFER_BIT);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-	__atomic_add_fetch(&frames_pending, 1, __ATOMIC_SEQ_CST);
-	web_post_frame(&frames_pending);
+	double started = emscripten_get_now(), posted, waited;
+	static int profile = -1;
+	static int finish = -1;
+	static double finish_total;
+	static unsigned long finish_frames;
+
+	/* ?HALO_WEB_TIMING=2: how long the browser's GPU process takes to run a
+	frame's commands (glFinish waits for them) */
+	if (finish < 0)
+	{
+		const char *setting = getenv("HALO_WEB_TIMING");
+
+		finish = setting && *setting == '2';
+	}
+	if (finish)
+	{
+		double before = emscripten_get_now();
+
+		glFinish();
+		finish_total += emscripten_get_now() - before;
+		if (++finish_frames == 150)
+		{
+			platform_log("the GPU process runs a frame in %.2f ms", finish_total / finish_frames);
+			finish_total = 0.0;
+			finish_frames = 0;
+		}
+		started = emscripten_get_now();
+	}
+
+	if (profile < 0)
+	{
+		const char *setting = getenv("HALO_WEB_PROFILE");
+
+		profile = setting && *setting == '1';
+		if (profile)
+			web_profile_frame(1);
+	}
+	if (profile)
+		web_profile_frame(0);
+
+	{
+		static int frames_shown;
+
+		if (++frames_shown % 30 == 1)
+			web_post_frame_count(frames_shown);
+	}
+#ifdef HALO_WEB_JSPI
+	glFlush();
+	posted = emscripten_get_now();
+	web_wait_animation_frame();
+	waited = emscripten_get_now();
+	web_frame_timing(started, posted, waited);
+	if (web_display_size(&width, &height) &&
+		emscripten_get_canvas_element_size("#canvas", &canvas_width, &canvas_height) == EMSCRIPTEN_RESULT_SUCCESS &&
+		(canvas_width != width || canvas_height != height))
+	{
+		emscripten_set_canvas_element_size("#canvas", (int)width, (int)height);
+	}
+	(void)pending;
+	return;
+#endif
+	/* ?HALO_WEB_TIMING=3: no frames to the page (nothing is shown), to
+	measure the game and the GPU process alone */
+	if (finish < 0 || !getenv("HALO_WEB_TIMING") || *getenv("HALO_WEB_TIMING") != '3')
+	{
+		__atomic_add_fetch(&frames_pending, 1, __ATOMIC_SEQ_CST);
+		web_post_frame(&frames_pending);
+	}
+	else
+	{
+		glFlush();
+	}
+	posted = emscripten_get_now();
 	while ((pending = __atomic_load_n(&frames_pending, __ATOMIC_ACQUIRE)) >= 2)
 		emscripten_futex_wait(&frames_pending, (uint32_t)pending, 100.0);
+	waited = emscripten_get_now();
+	web_frame_timing(started, posted, waited);
 	/* the next frame at the page's size */
 	if (web_display_size(&width, &height) &&
 		emscripten_get_canvas_element_size("#canvas", &canvas_width, &canvas_height) == EMSCRIPTEN_RESULT_SUCCESS &&

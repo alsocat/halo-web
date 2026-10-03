@@ -59,7 +59,7 @@
       gpu = 'WebGL error ' + error;
     }
     const text = [
-      reason,
+      reason + (jspi ? ' (jspi)' : ''),
       navigator.userAgent,
       'gpu ' + gpu,
       'isolated ' + window.crossOriginIsolated + ', memory ' + (navigator.deviceMemory || '?') + ' GB, cores ' +
@@ -96,7 +96,7 @@
   // that resolution
   function displaySize() {
     const ratio = window.devicePixelRatio || 1;
-    const rect = screen.getBoundingClientRect();
+    const rect = (screen.style.display === 'none' ? canvas : screen).getBoundingClientRect();
     return [Math.max(1, Math.round(rect.width * ratio)), Math.max(1, Math.round(rect.height * ratio))];
   }
 
@@ -107,14 +107,22 @@
   // ?debug: the game's log on screen too, as the native builds show it
   const query = new URLSearchParams(location.search);
 
-  // this build's engine (port/web/deploy.sh names it; halo.js as built)
-  const engine = window.HALO_BUILD ? 'halo.' + window.HALO_BUILD : 'halo';
+  // The engine: with JSPI where the browser has it (the game's own canvas
+  // shows its frames: halo-jspi.js), else frames shown as ImageBitmaps.
+  // ?jspi=0 asks for the second. (port/web/deploy.sh names each build's.)
+  const jspi = typeof WebAssembly.Suspending === 'function' &&
+    new URLSearchParams(location.search).get('jspi') !== '0';
+  const engine = (jspi ? 'halo-jspi' : 'halo') + (window.HALO_BUILD ? '.' + window.HALO_BUILD : '');
+  if (jspi) {
+    canvas.classList.add('shown');
+    screen.style.display = 'none';
+  }
 
   window.Module = {
     canvas,
     // (the game's threads load the same build's script)
     mainScriptUrlOrBlob: engine + '.js',
-    locateFile: (path) => path === 'halo.wasm' ? engine + '.wasm' : path,
+    locateFile: (path) => path.endsWith('.wasm') ? engine + '.wasm' : path,
     preRun: [() => {
       if (query.has('debug')) Module.ENV.HALO_CONSOLE_LOG = 'all';
       // and any setting by its environment name (port/linux/src/port_config.c),
@@ -144,6 +152,15 @@
         Atomics.sub(Module.HEAP32, pending >> 2, 1);
         Atomics.notify(Module.HEAP32, pending >> 2);
       });
+    },
+    // frames shown so far, every 30 (web_platform.c)
+    haloFrames(count) {
+      if (count > framesShown) framesShown = count;
+      if (!shown) {
+        shown = true;
+        status.classList.add('hidden');
+        canvas.focus();
+      }
     },
     // the network's rings exist (posix_bridge.c)
     haloNetAttach() {
@@ -220,7 +237,7 @@
     });
   }
 
-  new ResizeObserver(tellSize).observe(screen);
+  new ResizeObserver(tellSize).observe(jspi ? canvas : screen);
   canvas.addEventListener('pointerdown', () => canvas.focus());
   showStatus('Loading…');
   const script = document.createElement('script');

@@ -216,7 +216,22 @@ def generate_web_build(n: Writer, sln: Any) -> None:
     n.build(outputs=[output], rule="web_link", inputs=objects,
             implicit=[pre_js] if pre_js.is_file() else [],
             variables={"ldflags": " ".join(ldflags)})
-    site_files = [output]
+    # The same game with JSPI (JavaScript Promise Integration): its thread
+    # waits for the browser's animation frame after each frame, returning to
+    # the browser, which then shows the canvas itself (port/web/src/
+    # web_platform.c). Showing frames as ImageBitmaps instead, as halo.js
+    # does for browsers without JSPI, is slow on Linux (a copy for each).
+    platform_source = PORT_DIR / "src" / "web_platform.c"
+    jspi_object = obj_dir / "jspi" / platform_source.with_suffix(".o")
+    n.build(outputs=jspi_object, rule="web_cc", inputs=platform_source, implicit=implicit,
+            variables={"cflags": f"{platform_cflags} -DHALO_WEB_JSPI=1"})
+    platform_object = obj_dir / platform_source.with_suffix(".o")
+    jspi_objects = [jspi_object if item == platform_object else item for item in objects]
+    jspi_output = site / "halo-jspi.js"
+    n.build(outputs=[jspi_output], rule="web_link", inputs=jspi_objects,
+            implicit=[pre_js] if pre_js.is_file() else [],
+            variables={"ldflags": " ".join(ldflags + ["-sJSPI"])})
+    site_files = [output, jspi_output]
     for item in sorted(shell_dir.glob("*")):
         if item.name == "pre.js" or not item.is_file():
             continue
