@@ -2351,6 +2351,11 @@ static boolean network_game_server_handle_message_client_game_start_request(
 			(the Xbox game took any event from any machine, and a machine
 			could hold the lobby or skip the countdown) */
 			if ((countdown_event == _network_game_server_countdown_event_player_left &&
+#ifdef HALO_WEB
+					/* the site: only the host delays the game (port/web/game/web_menus.c
+					hides DELAY GAME from the others) */
+					network_game_server_client_machine_is_local(server, client_machine) &&
+#endif
 					network_game_server_client_machine_may_slow_countdown(server, client_machine)) ||
 				countdown_event == _network_game_server_countdown_event_player_joined ||
 				((countdown_event == _network_game_server_countdown_event_stop ||

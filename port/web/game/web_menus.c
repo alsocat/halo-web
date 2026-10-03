@@ -10,6 +10,9 @@ profile last used (else the first), without the four-way profile screens.
 Games are found and joined over the site's network (port/web/shell/net.js),
 and netcode v2 joins games in progress.
 
+DELAY GAME: only the host's pregame screen offers it (X); the host ignores
+the others' (networking/network_server_message_handler.c).
+
 The creator: on the site's first visit (no player profile yet) the game opens
 on a short profile screen (name, colour, save) with the name being typed,
 then the main menu; the profile is the player's from then on.
@@ -25,6 +28,7 @@ the map of the menus the changes below are made against.
 #include "interface/event_manager.h"
 #include "interface/player_ui.h"
 #include "interface/virtual_keyboard.h"
+#include "networking/network_game_globals.h"
 #include "saved games/player_profile.h"
 #include "saved games/saved_game_files.h"
 #include "tag_files/tag_files.h"
@@ -39,6 +43,7 @@ boolean ui_widget_event_handler_function_invoke(struct widget_instance *widget, 
 boolean web_menus_event_function(struct widget_instance *widget, struct event_record *event,
 	word function_index, boolean *widget_deleted);
 boolean web_menus_load_first_screen(void);
+boolean web_menus_skip_child(long parent_tag_index, char const *child_name);
 void main_screen_shell_load(void);
 boolean filesystem_check_thread_is_active(void);
 struct player_profile *player_ui_get_edit_player_profile(void);
@@ -134,6 +139,7 @@ enum
 #define SERVER_LIST_SCREEN MULTIPLAYER_SCREEN "connected\\server_list\\server_list_screen"
 #define FOUND_GAMES_HEADER MULTIPLAYER_SCREEN "connected\\server_list\\header_found_games"
 #define LARGE_FONT "ui\\large_ui"
+#define PREGAME_BUTTON_KEY MULTIPLAYER_SCREEN "connected\\pregame\\mp_button_key"
 #define PROFILE_EDIT "ui\\shell\\main_menu\\settings_select\\player_setup\\"
 #define CREATOR_SCREEN PROFILE_EDIT "create_and_edit_player_profile_screen"
 #define PROFILE_EDIT_LIST PROFILE_EDIT "player_profile_edit\\profile_edit_select_list"
@@ -289,6 +295,20 @@ static boolean online_play(struct widget_instance *widget, struct event_record *
 	if (controller_index == 0)
 		player_ui_remember_player1_profile(TRUE);
 	return TRUE;
+}
+
+/* ---------- DELAY GAME, the host's alone */
+
+/* the pregame screen's button key without X =DELAY GAME where this machine
+is not the host: its children left out as the screen is made
+(interface/ui_widget.c) */
+boolean web_menus_skip_child(long parent_tag_index, char const *child_name)
+{
+	/* (a guest has joined a host's game when the screen is made; the host's
+	own screen is made before its server is) */
+	return global_network_game_client_get() != NULL && global_network_game_server_get() == NULL &&
+		(!strcmp(child_name, "x_butn") || !strcmp(child_name, "=delay game")) &&
+		!strcmp(tag_get_name(parent_tag_index), PREGAME_BUTTON_KEY);
 }
 
 /* ---------- the creator */
@@ -556,7 +576,8 @@ own as it starts: web_menus_frame loads the menu again then) */
 boolean web_menus_load_first_screen(void)
 {
 	creator_restore();
-	if (creator.launched)
+	/* (not for the network tests, which host or join as they start) */
+	if (creator.launched || getenv("HALO_NETWORK_TEST"))
 		return FALSE;
 	if (filesystem_check_thread_is_active())
 	{

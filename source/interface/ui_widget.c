@@ -3496,6 +3496,15 @@ static boolean ui_widget_load_children_recursive(
 					reference->custom_controller_index);
 			}
 		}
+#ifdef HALO_WEB
+		/* the site's menus leave some out (port/web/game/web_menus.c) */
+		{
+			extern boolean web_menus_skip_child(long parent_tag_index, char const *child_name);
+
+			if (web_menus_skip_child(widget->definition_tag_index, reference->name))
+				continue;
+		}
+#endif
 		if (reference->widget_tag.index != NONE)
 		{
 			struct widget_instance *child = ui_widget_load_by_name_or_tag(
