@@ -50,6 +50,11 @@
     canvas,
     preRun: [() => {
       if (query.has('debug')) Module.ENV.HALO_CONSOLE_LOG = 'all';
+      // and any setting by its environment name (port/linux/src/port_config.c),
+      // ?HALO_NETWORK_TEST=join for one
+      for (const [name, value] of query) {
+        if (/^HALO_[A-Z0-9_]+$/.test(name)) Module.ENV[name] = value;
+      }
     }],
     print: (text) => console.log(text),
     printErr: (text) => console.log(text),
