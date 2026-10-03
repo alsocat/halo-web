@@ -28,8 +28,69 @@
     return;
   }
 
-  const view = screen.getContext('bitmaprenderer');
+  // (the frames are opaque: web_platform.c)
+  const view = screen.getContext('bitmaprenderer', { alpha: false });
   let shown = false;
+  let framesShown = 0;
+  let brightness = null;
+  const started = performance.now();
+
+  // the game's last lines, for the report below
+  const logLines = [];
+  function remember(text) {
+    console.log(text);
+    logLines.push(String(text));
+    if (logLines.length > 200) logLines.shift();
+  }
+
+  // A report to the site's server (its access log, port/web/nginx.conf), so a
+  // player's problem can be seen there: the browser, its GPU, how far the game
+  // got and its last lines. Once 30 seconds in, and once if the game stops.
+  const reported = new Set();
+  function report(reason) {
+    if (reported.has(reason)) return;
+    reported.add(reason);
+    let gpu = 'no WebGL 2';
+    try {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+      if (gl) gpu = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    } catch (error) {
+      gpu = 'WebGL error ' + error;
+    }
+    const text = [
+      reason,
+      navigator.userAgent,
+      'gpu ' + gpu,
+      'isolated ' + window.crossOriginIsolated + ', memory ' + (navigator.deviceMemory || '?') + ' GB, cores ' +
+        (navigator.hardwareConcurrency || '?'),
+      'frames ' + framesShown + ', brightness ' + brightness + ', after ' + Math.round((performance.now() - started) / 1000) + ' s',
+      'status ' + (status.classList.contains('hidden') ? '(hidden)' : statusText.textContent + ' ' + statusDetail.textContent),
+      ...logLines.slice(-30),
+    ].join('\n');
+    fetch('report?' + new URLSearchParams({ d: text.slice(0, 6000) }), { keepalive: true }).catch(() => {});
+  }
+  setTimeout(() => report('30 seconds'), 30000);
+  addEventListener('error', (event) => {
+    remember('page error: ' + event.message);
+    report('page error');
+  });
+
+  // how bright one frame is (0 is black), once 20 seconds in
+  function measure(bitmap) {
+    try {
+      const sample = document.createElement('canvas');
+      sample.width = sample.height = 16;
+      const context = sample.getContext('2d');
+      context.drawImage(bitmap, 0, 0, 16, 16);
+      const pixels = context.getImageData(0, 0, 16, 16).data;
+      let total = 0;
+      for (let index = 0; index < pixels.length; index += 4) total += pixels[index] + pixels[index + 1] + pixels[index + 2];
+      brightness = Math.round(total / (16 * 16 * 3));
+    } catch (error) {
+      brightness = 'error ' + error;
+    }
+  }
 
   // the page's size in the device's pixels: the game draws that shape at
   // that resolution
@@ -56,14 +117,16 @@
         if (/^HALO_[A-Z0-9_]+$/.test(name)) Module.ENV[name] = value;
       }
     }],
-    print: (text) => console.log(text),
-    printErr: (text) => console.log(text),
+    print: remember,
+    printErr: remember,
     // a frame from the game's thread (web_platform.c web_present_frame)
     haloFrame(bitmap, pending) {
       if (screen.width !== bitmap.width || screen.height !== bitmap.height) {
         screen.width = bitmap.width;
         screen.height = bitmap.height;
       }
+      framesShown++;
+      if (brightness === null && performance.now() - started > 20000) measure(bitmap);
       view.transferFromImageBitmap(bitmap);
       if (!shown) {
         shown = true;
@@ -91,6 +154,8 @@
     },
     onAbort(reason) {
       showStatus('The game stopped.', String(reason), true);
+      remember('stopped: ' + reason);
+      report('stopped');
     },
   };
 

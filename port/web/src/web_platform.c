@@ -28,6 +28,7 @@ canvas and its frames.
 #include <emscripten/html5.h>
 #include <emscripten/threading.h>
 #include <emscripten/wasmfs.h>
+#include <GLES3/gl3.h>
 
 #include "platform.h"
 #include "posix.h"
@@ -116,6 +117,16 @@ void web_present_frame(void)
 {
 	long width, height;
 	int pending, canvas_width, canvas_height;
+
+	/* the frame opaque: the game leaves its alpha as the render targets had
+	it (0), which some browsers show as nothing over the page's black (the
+	renderer resets the GL state it caches after a frame: d3d8_gl.c) */
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glDisable(GL_SCISSOR_TEST);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	__atomic_add_fetch(&frames_pending, 1, __ATOMIC_SEQ_CST);
 	web_post_frame(&frames_pending);
