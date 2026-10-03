@@ -355,6 +355,10 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 
+#ifdef HALO_WEB
+short web_menus_list_item_index(long list_tag_index, short index);
+#endif
+
 /* ---------- constants */
 
 enum
@@ -740,6 +744,11 @@ static void settings_menu_update_extended_description(
 		index++;
 	}
 
+#ifdef HALO_WEB
+	/* (the item's place in the list as the map has it, where the site's
+	menus leave some items out: port/web/game/web_menus.c) */
+	index = web_menus_list_item_index(list_widget->definition_tag_index, index);
+#endif
 	if (index != NONE)
 	{
 		match_vassert(
@@ -783,6 +792,11 @@ static void playlist_settings_menu_update_extended_description(
 		index++;
 	}
 
+#ifdef HALO_WEB
+	/* (the item's place in the list as the map has it, where the site's
+	menus leave some items out: port/web/game/web_menus.c) */
+	index = web_menus_list_item_index(list_widget->definition_tag_index, index);
+#endif
 	if (index != NONE)
 	{
 		description_definition = ui_widget_definition_get(
@@ -824,6 +838,11 @@ static void playlist_gametype_select_menu_update_extended_description(
 		index++;
 	}
 
+#ifdef HALO_WEB
+	/* (the item's place in the list as the map has it, where the site's
+	menus leave some items out: port/web/game/web_menus.c) */
+	index = web_menus_list_item_index(list_widget->definition_tag_index, index);
+#endif
 	if (index != NONE)
 	{
 		description_definition = ui_widget_definition_get(
@@ -866,6 +885,11 @@ static void multiplayer_type_menu_update_extended_description(
 		index++;
 	}
 
+#ifdef HALO_WEB
+	/* (the item's place in the list as the map has it, where the site's
+	menus leave some items out: port/web/game/web_menus.c) */
+	index = web_menus_list_item_index(list_widget->definition_tag_index, index);
+#endif
 	if (index != NONE)
 	{
 		list_widget->parameters.list.extended_description->child->
@@ -909,6 +933,11 @@ static void difficulty_select_menu_update_extended_description(
 		index++;
 	}
 
+#ifdef HALO_WEB
+	/* (the item's place in the list as the map has it, where the site's
+	menus leave some items out: port/web/game/web_menus.c) */
+	index = web_menus_list_item_index(list_widget->definition_tag_index, index);
+#endif
 	if (index != NONE)
 	{
 		match_vassert(
@@ -2244,6 +2273,11 @@ static void player_profile_edit_select_menu_update_extended_description(
 		index++;
 	}
 
+#ifdef HALO_WEB
+	/* (the item's place in the list as the map has it, where the site's
+	menus leave some items out: port/web/game/web_menus.c) */
+	index = web_menus_list_item_index(list_widget->definition_tag_index, index);
+#endif
 	if (index != NONE)
 	{
 		description_definition = ui_widget_definition_get(

@@ -48,6 +48,7 @@ boolean web_menus_event_function(struct widget_instance *widget, struct event_re
 	word function_index, boolean *widget_deleted);
 boolean web_menus_load_first_screen(void);
 boolean web_menus_skip_child(long parent_tag_index, char const *child_name);
+short web_menus_list_item_index(long list_tag_index, short index);
 void main_screen_shell_load(void);
 boolean filesystem_check_thread_is_active(void);
 struct player_profile *player_ui_get_edit_player_profile(void);
@@ -148,6 +149,7 @@ enum
 #define PROFILE_EDIT "ui\\shell\\main_menu\\settings_select\\player_setup\\"
 #define CREATOR_SCREEN PROFILE_EDIT "create_and_edit_player_profile_screen"
 #define PROFILE_EDIT_LIST PROFILE_EDIT "player_profile_edit\\profile_edit_select_list"
+#define PROFILE_EDIT_SCREEN PROFILE_EDIT "player_profile_edit\\player_profile_edit_screen"
 #define PROFILE_SAVE_ITEM PROFILE_EDIT "player_profile_edit\\save_changes_profile_item"
 
 enum
@@ -646,9 +648,30 @@ boolean web_menus_skip_child(long parent_tag_index, char const *child_name)
 /* the profile screen as the creator, while it is up: its list only the
 name, colour and save, and save going on to the main menu (on the next
 frame, as the game loads it: the save item's handler opens the saving screen
-first) */
+first); B (and back) do nothing, as there is no screen before it to go back
+to, and B =CANCEL is not shown */
 #define CREATOR_MAXIMUM_ITEMS 8
 #define CREATOR_MAXIMUM_HANDLERS 4
+#define CREATOR_MAXIMUM_SCREEN_HANDLERS 16
+#define CREATOR_MAXIMUM_SCREEN_CHILDREN 16
+
+enum
+{
+	/* the widgets' events: the gamepad's buttons (interface/ui_widget.c) */
+	WIDGET_EVENT_B_BUTTON = 1,
+	WIDGET_EVENT_BACK_BUTTON = 13
+};
+
+/* a screen of the creator's, with handlers for B and back that do nothing:
+a screen without go back to the one before it */
+struct creator_screen
+{
+	struct web_ui_widget *widget;
+	struct tag_block handlers;
+	struct tag_block children;
+	struct web_ui_event_handler new_handlers[CREATOR_MAXIMUM_SCREEN_HANDLERS];
+	struct web_ui_child new_children[CREATOR_MAXIMUM_SCREEN_CHILDREN];
+};
 
 static struct
 {
@@ -663,10 +686,70 @@ static struct
 	struct web_ui_widget *save_item;
 	struct web_ui_event_handler save_handlers[CREATOR_MAXIMUM_HANDLERS];
 	struct web_ui_child items[CREATOR_MAXIMUM_ITEMS];
+	/* each item's place in the map's list (its description's) */
+	short item_indices[CREATOR_MAXIMUM_ITEMS];
+	struct creator_screen screens[2];
 } creator = { FALSE, FALSE, FALSE, FALSE, NONE };
+
+static void creator_screen_restore(struct creator_screen *screen)
+{
+	if (screen->widget)
+	{
+		screen->widget->event_handlers = screen->handlers;
+		screen->widget->child_widgets = screen->children;
+		screen->widget = NULL;
+	}
+}
+
+/* the screen without going back, nor B =CANCEL shown */
+static boolean creator_screen_change(struct creator_screen *screen, char const *name)
+{
+	long tag_index = tag_loaded(WEB_UI_WIDGET_DEFINITION_TAG, name);
+	struct web_ui_widget *widget;
+	short events[] = { WIDGET_EVENT_B_BUTTON, WIDGET_EVENT_BACK_BUTTON };
+	long count, index;
+
+	if (tag_index == NONE)
+		return FALSE;
+	widget = tag_get(WEB_UI_WIDGET_DEFINITION_TAG, tag_index);
+	if (widget->event_handlers.count + (long)NUMBEROF(events) > CREATOR_MAXIMUM_SCREEN_HANDLERS ||
+		widget->child_widgets.count > CREATOR_MAXIMUM_SCREEN_CHILDREN)
+	{
+		return FALSE;
+	}
+	screen->widget = widget;
+	screen->handlers = widget->event_handlers;
+	screen->children = widget->child_widgets;
+	count = widget->event_handlers.count;
+	memcpy(screen->new_handlers, widget->event_handlers.address, count * sizeof(struct web_ui_event_handler));
+	for (index = 0; index < (long)NUMBEROF(events); index++)
+	{
+		struct web_ui_event_handler *handler = &screen->new_handlers[count++];
+
+		memset(handler, 0, sizeof(*handler));
+		handler->event_type = events[index];
+		handler->widget_tag.index = NONE;
+		handler->sound_effect.index = NONE;
+	}
+	widget->event_handlers.address = screen->new_handlers;
+	widget->event_handlers.count = count;
+	count = 0;
+	for (index = 0; index < screen->children.count; index++)
+	{
+		struct web_ui_child *child = (struct web_ui_child *)screen->children.address + index;
+
+		if (strcmp(child->name, "=cancel") && strcmp(child->name, "b_butn"))
+			screen->new_children[count++] = *child;
+	}
+	widget->child_widgets.address = screen->new_children;
+	widget->child_widgets.count = count;
+	return TRUE;
+}
 
 static void creator_restore(void)
 {
+	creator_screen_restore(&creator.screens[0]);
+	creator_screen_restore(&creator.screens[1]);
 	if (creator.list)
 	{
 		creator.list->child_widgets = creator.list_children;
@@ -701,11 +784,18 @@ static boolean creator_change_screen(void)
 		if (!strcmp(child->name, "name_profile_item") || !strcmp(child->name, "color_profile_item") ||
 			!strcmp(child->name, "save_changes_profile_item"))
 		{
+			creator.item_indices[count] = (short)index;
 			creator.items[count++] = *child;
 		}
 	}
 	if (count != 3)
 		return FALSE;
+	if (!creator_screen_change(&creator.screens[0], CREATOR_SCREEN) ||
+		!creator_screen_change(&creator.screens[1], PROFILE_EDIT_SCREEN))
+	{
+		creator_screen_restore(&creator.screens[0]);
+		return FALSE;
+	}
 	creator.list = list;
 	creator.list_children = list->child_widgets;
 	creator.save_item = save_item;
@@ -865,6 +955,19 @@ static void dump_widgets(void)
 }
 
 /* ---------- public code */
+
+/* a list item's place in the list as the map has it (interface/
+ui_widget_game_data_input_functions.c: its description's) */
+short web_menus_list_item_index(long list_tag_index, short index)
+{
+	if (creator.list && list_tag_index != NONE &&
+		tag_get(WEB_UI_WIDGET_DEFINITION_TAG, list_tag_index) == (void *)creator.list &&
+		index >= 0 && index < creator.list->child_widgets.count)
+	{
+		return creator.item_indices[index];
+	}
+	return index;
+}
 
 /* the site's event handler functions (WEB_FUNCTION_...) */
 boolean web_menus_event_function(struct widget_instance *widget, struct event_record *event,
