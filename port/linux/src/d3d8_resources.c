@@ -21,6 +21,30 @@ static void *resource_data(DWORD data)
 	return data ? PLATFORM_PHYSICAL_TO_VIRTUAL(data) : NULL;
 }
 
+#ifdef HALO_WEB
+/* WebAssembly has no page protection, so the memory watch cannot see the
+game's own writes to the contiguous window (port/web/src/memory_watch_web.c).
+What the game writes there goes through a lock first (CPU-written textures,
+the dynamic vertex rings), so a lock counts as a write to what it covers: the
+texture cache then uploads it again before the next draw. The game locks
+dynamic buffers D3DLOCK_READONLY and still writes them, so the flags are not
+trusted. (From damiantw/halo-ce-web-multiplayer.) */
+static void announce_write(void *address, unsigned long size)
+{
+	if (address)
+		memory_watch_prepare_write(address, size ? size : 1);
+}
+
+static void announce_texture_write(const DWORD *resource)
+{
+	struct xgpu_texture_description description;
+
+	xgpu_texture_describe(resource[3], resource[4], &description);
+	announce_write(resource_data(resource[1]),
+		xgpu_texture_face_size(&description) * (description.cube_map ? 6 : 1));
+}
+#endif
+
 static void *allocate_resource_memory(unsigned long size)
 {
 	void *memory = platform_contiguous_alloc(size, D3DTEXTURE_ALIGNMENT,
@@ -240,6 +264,9 @@ static void lock_level(const DWORD *resource, unsigned long face, unsigned long 
 void WINAPI D3DTexture_LockRect(D3DTexture *texture, UINT level, D3DLOCKED_RECT *locked, CONST RECT *rectangle, DWORD flags)
 {
 	(void)flags;
+#ifdef HALO_WEB
+	announce_texture_write((const DWORD *)texture);
+#endif
 	lock_level((const DWORD *)texture, 0, level, locked, rectangle);
 }
 
@@ -247,6 +274,9 @@ void WINAPI D3DCubeTexture_LockRect(D3DCubeTexture *texture, D3DCUBEMAP_FACES fa
 	D3DLOCKED_RECT *locked, CONST RECT *rectangle, DWORD flags)
 {
 	(void)flags;
+#ifdef HALO_WEB
+	announce_texture_write((const DWORD *)texture);
+#endif
 	lock_level((const DWORD *)texture, (unsigned long)face, level, locked, rectangle);
 }
 
@@ -260,6 +290,9 @@ void WINAPI D3DVolumeTexture_LockBox(D3DVolumeTexture *texture, UINT level, D3DL
 
 	(void)flags;
 	xgpu_texture_describe(resource[3], resource[4], &description);
+#ifdef HALO_WEB
+	announce_texture_write(resource);
+#endif
 	row_pitch = xgpu_texture_level_pitch(&description, level);
 	slice = row_pitch * level_dimension(description.height, level);
 	bits = (char *)resource_data(resource[1]);
@@ -326,6 +359,9 @@ void WINAPI D3DSurface_GetDesc(D3DSurface *surface, D3DSURFACE_DESC *description
 void WINAPI D3DSurface_LockRect(D3DSurface *surface, D3DLOCKED_RECT *locked, CONST RECT *rectangle, DWORD flags)
 {
 	(void)flags;
+#ifdef HALO_WEB
+	announce_texture_write((const DWORD *)surface);
+#endif
 	lock_level((const DWORD *)surface, 0, 0, locked, rectangle);
 }
 
@@ -358,6 +394,10 @@ void WINAPI D3DVertexBuffer_Lock(D3DVertexBuffer *buffer, UINT offset, UINT size
 	(void)size;
 	(void)flags;
 	*data = buffer->Data ? (BYTE *)resource_data(buffer->Data) + offset : NULL;
+#ifdef HALO_WEB
+	if (*data)
+		announce_write(*data, size);
+#endif
 }
 
 HRESULT WINAPI D3DDevice_CreateIndexBuffer(UINT length, DWORD usage, D3DFORMAT format, D3DPOOL pool, D3DIndexBuffer **result)
@@ -421,6 +461,9 @@ void WINAPI D3DPalette_Lock(D3DPalette *palette, D3DCOLOR **colors, DWORD flags)
 {
 	(void)flags;
 	*colors = (D3DCOLOR *)resource_data(palette->Data);
+#ifdef HALO_WEB
+	announce_write(*colors, 256 * sizeof(D3DCOLOR));
+#endif
 }
 
 /* ---------- D3DX */

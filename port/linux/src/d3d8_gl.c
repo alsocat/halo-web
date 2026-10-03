@@ -2276,6 +2276,48 @@ static GLenum blend_equation(DWORD operation)
 	}
 }
 
+#ifdef HALO_WEB
+static BOOL blend_factor_is_constant_color(GLenum factor)
+{
+	return factor == GL_CONSTANT_COLOR || factor == GL_ONE_MINUS_CONSTANT_COLOR;
+}
+
+static BOOL blend_factor_is_constant_alpha(GLenum factor)
+{
+	return factor == GL_CONSTANT_ALPHA || factor == GL_ONE_MINUS_CONSTANT_ALPHA;
+}
+
+/* WebGL refuses a blend function that mixes the constant colour with the
+constant alpha (INVALID_OPERATION, and the draw blends with the previous
+function). The transparent meter shaders (the plasma weapons' heat meters,
+rasterizer_xbox_transparent_geometry.c) blend so: the alpha factor becomes
+the constant it is (the tints use an alpha of 0 or 1), else the colour
+factor of the constant's alpha as a grey. (From
+damiantw/halo-ce-web-multiplayer.) */
+static void web_blend_factors(GLenum *source, GLenum *destination, DWORD blend_color)
+{
+	GLenum *alpha_factor;
+	unsigned long alpha = blend_color >> 24;
+
+	if (blend_factor_is_constant_alpha(*source) && blend_factor_is_constant_color(*destination))
+		alpha_factor = source;
+	else if (blend_factor_is_constant_alpha(*destination) && blend_factor_is_constant_color(*source))
+		alpha_factor = destination;
+	else
+		return;
+	if (alpha == 0xff || alpha == 0)
+	{
+		BOOL one = (alpha == 0xff) == (*alpha_factor == GL_CONSTANT_ALPHA);
+
+		*alpha_factor = one ? GL_ONE : GL_ZERO;
+	}
+	else
+	{
+		*alpha_factor = *alpha_factor == GL_CONSTANT_ALPHA ? GL_CONSTANT_COLOR : GL_ONE_MINUS_CONSTANT_COLOR;
+	}
+}
+#endif
+
 static void apply_raster_state(BOOL has_depth)
 {
 	DWORD *rs = D3D__RenderState;
@@ -2369,12 +2411,16 @@ static void apply_raster_state(BOOL has_depth)
 	{
 		GLenum equation = blend_equation(rs[D3DRS_BLENDOP]);
 		float blend_color[4];
+		GLenum source = (GLenum)rs[D3DRS_SRCBLEND];
+		GLenum destination = (GLenum)rs[D3DRS_DESTBLEND];
 
-		if (gl_state.blend_source != (GLenum)rs[D3DRS_SRCBLEND] ||
-			gl_state.blend_destination != (GLenum)rs[D3DRS_DESTBLEND])
+#ifdef HALO_WEB
+		web_blend_factors(&source, &destination, rs[D3DRS_BLENDCOLOR]);
+#endif
+		if (gl_state.blend_source != source || gl_state.blend_destination != destination)
 		{
-			gl_state.blend_source = (GLenum)rs[D3DRS_SRCBLEND];
-			gl_state.blend_destination = (GLenum)rs[D3DRS_DESTBLEND];
+			gl_state.blend_source = source;
+			gl_state.blend_destination = destination;
 			glBlendFunc(gl_state.blend_source, gl_state.blend_destination);
 		}
 		if (gl_state.blend_equation != equation)
@@ -2989,6 +3035,16 @@ static BOOL mirror_range(unsigned long address, unsigned long size, GLuint *buff
 	unsigned long segment, first, last, page, oldest = ~0UL, newest = 0;
 	BOOL present = TRUE;
 
+#ifdef HALO_WEB
+	/* Without page protection (port/web/src/memory_watch_web.c) the mirror
+	cannot tell when the game rewrites vertex or index data: pages uploaded
+	once were drawn stale, which put the first-person weapon's triangles
+	across the screen. Every draw streams its data (after
+	damiantw/halo-ce-web-multiplayer). */
+	(void)start; (void)segment; (void)first; (void)last; (void)page; (void)oldest; (void)newest; (void)present;
+	(void)buffer; (void)offset; (void)generation;
+	return FALSE;
+#endif
 	if (!size || address < PLATFORM_CONTIGUOUS_BASE || start + size > PLATFORM_CONTIGUOUS_SIZE)
 		return FALSE;
 	segment = start / MIRROR_SEGMENT_SIZE;
@@ -3085,6 +3141,36 @@ static void index_extent(const WORD *indices, unsigned long count, unsigned long
 is full. A draw reserves room for all of its streams at once: orphaning
 between two of them would leave the attributes already pointed at the
 buffer reading its new, empty storage. */
+#ifdef HALO_WEB
+/* WebGL runs each call in the browser's GPU process, whose backends (ANGLE
+on OpenGL, Metal or Direct3D) cannot write into a buffer that draws already
+queued for the frame read: each glBufferSubData into the stream buffers
+(hundreds a frame) then copies the buffer or waits for the GPU. Instead
+every upload gives a buffer new storage (glBufferData), which no queued draw
+reads: vertices take the next buffer of a ring, which becomes
+device.stream_buffer, and indices the index buffer; the offset is always 0.
+(After damiantw/halo-ce-web-multiplayer and fucktrevor/halo-ce-universal
+c9aedaab, CC0.) */
+#define WEB_UPLOAD_RING 256
+
+static GLuint web_upload_ring[WEB_UPLOAD_RING];
+static unsigned long web_upload_next;
+
+static void stream_reserve(unsigned long size)
+{
+	(void)size;
+}
+
+static unsigned long stream_upload(const void *data, unsigned long size)
+{
+	if (!web_upload_ring[0])
+		glGenBuffers(WEB_UPLOAD_RING, web_upload_ring);
+	device.stream_buffer = web_upload_ring[web_upload_next++ % WEB_UPLOAD_RING];
+	state_array_buffer(device.stream_buffer);
+	glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size + 3) & ~3UL), data, GL_STREAM_DRAW);
+	return 0;
+}
+#else
 static void stream_reserve(unsigned long size)
 {
 	if (device.stream_offset + size > STREAM_BUFFER_SIZE)
@@ -3112,6 +3198,7 @@ static unsigned long stream_upload(const void *data, unsigned long size)
 	device.stream_offset += size;
 	return offset;
 }
+#endif
 
 #ifdef HALO_GLES
 /* stream_upload, with the D3DCOLOR elements of the stream turned from BGRA
@@ -3155,6 +3242,15 @@ static unsigned long stream_upload_swizzled(const struct vertex_shader_object *d
 }
 #endif
 
+#ifdef HALO_WEB
+/* the index buffer gets new storage for each upload (see stream_upload) */
+static unsigned long index_upload(const void *data, unsigned long size)
+{
+	state_element_array_buffer(device.index_buffer);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)((size + 3) & ~3UL), data, GL_STREAM_DRAW);
+	return 0;
+}
+#else
 static unsigned long index_upload(const void *data, unsigned long size)
 {
 	unsigned long offset;
@@ -3175,6 +3271,7 @@ static unsigned long index_upload(const void *data, unsigned long size)
 	device.index_offset += size;
 	return offset;
 }
+#endif
 
 static void attribute_format(const struct vertex_element *element, GLint *size, GLenum *type, GLboolean *normalized)
 {

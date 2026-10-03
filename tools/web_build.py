@@ -38,6 +38,11 @@ WEB_ABI_FLAGS = [
     "-fno-delete-null-pointer-checks",
     "-ffp-contract=off",
     "-O2",
+    # WebAssembly SIMD (as fqlx's and damiantw's browser builds). Not -flto:
+    # across files LLVM sees calls through prototypes that differ from the
+    # definition only in C types (a boolean for a short), which WebAssembly
+    # passes alike, and compiles them as unreachable
+    "-msimd128",
     *(f"-fno-builtin-{name}" for name in (
         "wcslen", "wcsnlen", "wcschr", "wcsrchr", "wcscmp", "wcsncmp", "wcscpy",
         "wcsncpy", "wcscat", "wcsncat", "wmemchr", "wmemcmp", "wmemcpy",
@@ -81,11 +86,12 @@ LINK_FLAGS = [
     "-sMIN_WEBGL_VERSION=2",
     "-sMAX_WEBGL_VERSION=2",
     "-sFULL_ES3",
-    # the Xbox's memory window at 0x80000000 (port/linux/src/platform.h)
-    # lies past 2 GB
-    "-sALLOW_MEMORY_GROWTH",
-    "-sMAXIMUM_MEMORY=4GB",
-    "-sINITIAL_MEMORY=256MB",
+    # the Xbox's memory window, 0x80000000 to 0x88000000
+    # (port/linux/src/platform.h), is the top of the memory, which has a fixed
+    # size: with threads, memory that can grow makes every access to it from
+    # JavaScript (each GL call) check whether it grew
+    "-sINITIAL_MEMORY=2281701376",
+    "-msimd128",
     "-sSTACK_SIZE=4MB",
     "-sDEFAULT_PTHREAD_STACK_SIZE=1MB",
     # the game's loop blocks: it runs on a thread of its own, with the
@@ -201,7 +207,9 @@ def generate_web_build(n: Writer, sln: Any) -> None:
 
     shell_dir = PORT_DIR / "shell"
     pre_js = shell_dir / "pre.js"
-    ldflags = [*LINK_FLAGS, "-O2" if release else "-O1", "-g" if not release else "-g0"]
+    # (function names in crash stacks, also in the release build: the page's
+    # reports carry them)
+    ldflags = [*LINK_FLAGS, "-O2" if release else "-O1", "-g" if not release else "--profiling-funcs"]
     if pre_js.is_file():
         ldflags.append(f"--pre-js {_quote(pre_js)}")
     output = site / "halo.js"

@@ -107,8 +107,14 @@
   // ?debug: the game's log on screen too, as the native builds show it
   const query = new URLSearchParams(location.search);
 
+  // this build's engine (port/web/deploy.sh names it; halo.js as built)
+  const engine = window.HALO_BUILD ? 'halo.' + window.HALO_BUILD : 'halo';
+
   window.Module = {
     canvas,
+    // (the game's threads load the same build's script)
+    mainScriptUrlOrBlob: engine + '.js',
+    locateFile: (path) => path === 'halo.wasm' ? engine + '.wasm' : path,
     preRun: [() => {
       if (query.has('debug')) Module.ENV.HALO_CONSOLE_LOG = 'all';
       // and any setting by its environment name (port/linux/src/port_config.c),
@@ -218,7 +224,7 @@
   canvas.addEventListener('pointerdown', () => canvas.focus());
   showStatus('Loading…');
   const script = document.createElement('script');
-  script.src = 'halo.js';
-  script.onerror = () => showStatus('The game did not load.', 'halo.js', true);
+  script.src = engine + '.js';
+  script.onerror = () => showStatus('The game did not load.', engine + '.js', true);
   document.body.appendChild(script);
 })();
