@@ -98,11 +98,10 @@ symbols in this file:
 #include "text/unicode.h"
 
 #ifdef HALO_WEB
-/* the page's text box, for typing on a keyboard (or a phone's) instead of
-picking each letter (port/web/src/web_input.c) */
-void web_text_entry_open(wchar_t const *text, int maximum_length);
-void web_text_entry_close(void);
-int web_text_entry_take(wchar_t *text, int size);
+/* the keyboard's keys are the text's while this is up (port/linux/src/
+xinput_sdl.c) */
+void platform_set_text_typing(int typing);
+static void virtual_keyboard_type(void);
 #endif
 
 /* ---------- constants */
@@ -468,9 +467,6 @@ boolean virtual_keyboard_launch(
 		virtual_keyboard_globals.saved_text[MAXIMUM_VIRTUAL_KEYBOARD_SAVED_TEXT_LENGTH - 1] = L'\0';
 		virtual_keyboard_globals.last_exit_saved_text = FALSE;
 		ui_play_audio_feedback_sound(_ui_audio_feedback_forward);
-#ifdef HALO_WEB
-		web_text_entry_open(text_buffer, virtual_keyboard_globals.buffer_size / (int)sizeof(wchar_t) - 1);
-#endif
 		result = TRUE;
 	}
 
@@ -956,6 +952,86 @@ void virtual_keyboard_close(
 	return;
 }
 
+#ifdef HALO_WEB
+/* a character typed: at the cursor, as the on-screen key's would be */
+static void virtual_keyboard_insert(
+	wchar_t character)
+{
+	if (virtual_keyboard_globals.first_key_replaces_buffer == TRUE)
+	{
+		csmemset(
+			virtual_keyboard_globals.text_buffer,
+			0,
+			virtual_keyboard_globals.buffer_size);
+		virtual_keyboard_globals.cursor = virtual_keyboard_globals.text_buffer;
+		virtual_keyboard_globals.first_key_replaces_buffer = FALSE;
+	}
+	if (virtual_keyboard_free_space_in_text_buffer() >= 2)
+	{
+		csmemmove(
+			virtual_keyboard_globals.cursor + 1,
+			virtual_keyboard_globals.cursor,
+			virtual_keyboard_globals.buffer_size - ((byte *)virtual_keyboard_globals.cursor - (byte *)virtual_keyboard_globals.text_buffer) - sizeof(wchar_t));
+		*virtual_keyboard_globals.cursor++ = character;
+		ui_play_audio_feedback_sound(_ui_audio_feedback_forward);
+	}
+	else
+	{
+		ui_play_audio_feedback_sound(_ui_audio_feedback_flag_failure);
+	}
+}
+
+/* the keys typed since the last frame: characters into the text, backspace
+and delete, the cursor's home and end, enter as DONE and escape as cancel
+(the arrows move over the on-screen keys, as the d-pad does) */
+static void virtual_keyboard_type(
+	void)
+{
+	struct key_stroke key;
+
+	while (virtual_keyboard_globals.active && input_get_key(&key))
+	{
+		switch (key.key_code)
+		{
+		case _key_return:
+		case _keypad_enter:
+			virtual_keyboard_globals.row = 0;
+			virtual_keyboard_globals.column = 0;
+			virtual_keyboard_select();
+			break;
+		case _key_escape:
+			virtual_keyboard_cancel();
+			break;
+		case _key_backspace:
+			virtual_keyboard_globals.first_key_replaces_buffer = FALSE;
+			virtual_keyboard_backspace();
+			break;
+		case _key_delete:
+			virtual_keyboard_globals.first_key_replaces_buffer = FALSE;
+			if (*virtual_keyboard_globals.cursor)
+			{
+				virtual_keyboard_globals.cursor++;
+				virtual_keyboard_backspace();
+			}
+			break;
+		case _key_home:
+			virtual_keyboard_globals.first_key_replaces_buffer = FALSE;
+			virtual_keyboard_globals.cursor = virtual_keyboard_globals.text_buffer;
+			break;
+		case _key_end:
+			virtual_keyboard_globals.first_key_replaces_buffer = FALSE;
+			virtual_keyboard_globals.cursor = virtual_keyboard_globals.text_buffer +
+				ustrlen(virtual_keyboard_globals.text_buffer);
+			break;
+		default:
+			if (key.ascii_code >= ' ' && key.ascii_code < 127)
+				virtual_keyboard_insert((wchar_t)key.ascii_code);
+			break;
+		}
+	}
+}
+#endif
+
 void virtual_keyboard_render(
 	void)
 {
@@ -969,31 +1045,9 @@ void virtual_keyboard_process(
 	void)
 {
 #ifdef HALO_WEB
-	/* the text typed in the page's box: the keyboard's text, as if DONE was
-	picked (which checks it); the box closed with the keyboard */
-	static boolean was_active;
-
 	if (virtual_keyboard_globals.active)
-	{
-		int taken = web_text_entry_take(virtual_keyboard_globals.text_buffer,
-			virtual_keyboard_globals.buffer_size / (int)sizeof(wchar_t));
-
-		if (taken == 1)
-		{
-			virtual_keyboard_globals.cursor = virtual_keyboard_globals.text_buffer +
-				ustrlen(virtual_keyboard_globals.text_buffer);
-			virtual_keyboard_globals.row = 0;
-			virtual_keyboard_globals.column = 0;
-			virtual_keyboard_select();
-		}
-		else if (taken == 2)
-		{
-			virtual_keyboard_cancel();
-		}
-	}
-	if (was_active && !virtual_keyboard_globals.active)
-		web_text_entry_close();
-	was_active = virtual_keyboard_globals.active;
+		virtual_keyboard_type();
+	platform_set_text_typing(virtual_keyboard_globals.active);
 #endif
 	if (virtual_keyboard_globals.active)
 		virtual_keyboard_process_internal();

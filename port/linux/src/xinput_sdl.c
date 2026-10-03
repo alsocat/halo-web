@@ -175,6 +175,23 @@ static void mouse_poll(const struct platform_input_state *input)
 
 /* ---------- keyboard and mouse as a controller */
 
+#ifdef HALO_WEB
+/* while the game's on-screen keyboard is up its text is typed on the
+keyboard (interface/virtual_keyboard.c), so the keys are not also the
+controller's buttons: only the arrows still move over the on-screen keys */
+static volatile int text_typing;
+/* typing ended with keys still down (enter, as DONE): they stay the text's
+until they are all up, so that enter is not also the A that follows */
+static volatile int text_typing_keys_down;
+
+void platform_set_text_typing(int typing)
+{
+	if (text_typing && !typing)
+		text_typing_keys_down = 1;
+	text_typing = typing;
+}
+#endif
+
 static BYTE analog(BOOL down)
 {
 	return down ? 0xff : 0x00;
@@ -204,6 +221,25 @@ static void keyboard_gamepad(const struct platform_input_state *input, XINPUT_GA
 	if (k[SDL_SCANCODE_DOWN]) pad->wButtons |= XINPUT_GAMEPAD_DPAD_DOWN;
 	if (k[SDL_SCANCODE_LEFT]) pad->wButtons |= XINPUT_GAMEPAD_DPAD_LEFT;
 	if (k[SDL_SCANCODE_RIGHT]) pad->wButtons |= XINPUT_GAMEPAD_DPAD_RIGHT;
+#ifdef HALO_WEB
+	if (text_typing_keys_down)
+	{
+		int scancode;
+
+		text_typing_keys_down = 0;
+		for (scancode = 0; scancode < SDL_SCANCODE_COUNT; scancode++)
+		{
+			if (k[scancode])
+				text_typing_keys_down = 1;
+		}
+	}
+	if (text_typing || text_typing_keys_down)
+	{
+		pad->sThumbLX = 0;
+		pad->sThumbLY = 0;
+		return;
+	}
+#endif
 	if (k[SDL_SCANCODE_ESCAPE]) pad->wButtons |= XINPUT_GAMEPAD_START;
 	if (k[SDL_SCANCODE_F1]) pad->wButtons |= XINPUT_GAMEPAD_BACK;
 	if (k[SDL_SCANCODE_LCTRL] || k[SDL_SCANCODE_C]) pad->wButtons |= XINPUT_GAMEPAD_LEFT_THUMB;
@@ -608,6 +644,16 @@ DWORD WINAPI XInputDebugGetKeystroke(PXINPUT_DEBUG_KEYSTROKE keystroke)
 		BOOL key_up = (next.flags & XINPUT_DEBUG_KEYSTROKE_FLAG_KEYUP) != 0;
 
 		/* key ups always pass, so no key is left latched down */
+#ifdef HALO_WEB
+		/* (and every key while a name is typed on the on-screen keyboard) */
+		if (text_typing)
+		{
+			keystroke->VirtualKey = next.virtual_key;
+			keystroke->Ascii = next.ascii;
+			keystroke->Flags = next.flags;
+			return ERROR_SUCCESS;
+		}
+#endif
 		if (key_up || next.virtual_key == VK_OEM_3_BACKQUOTE || console_is_active())
 		{
 			keystroke->VirtualKey = next.virtual_key;
