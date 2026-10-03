@@ -50,6 +50,9 @@ static void web_settings(void)
 	is system link */
 	setenv("HALO_NET_ONLINE", "false", 0);
 	setenv("HALO_NET_ALLOW_UPNP", "false", 0);
+	/* the game's log goes to the browser's console, not over the game
+	(the page's ?debug shows it all on screen too: port/web/shell/page.js) */
+	setenv("HALO_CONSOLE_LOG", "none", 0);
 }
 
 /* ---------- files */

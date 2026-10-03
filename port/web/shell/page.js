@@ -43,8 +43,14 @@
     if (Module._web_set_display_size) Module._web_set_display_size(...displaySize());
   }
 
+  // ?debug: the game's log on screen too, as the native builds show it
+  const query = new URLSearchParams(location.search);
+
   window.Module = {
     canvas,
+    preRun: [() => {
+      if (query.has('debug')) Module.ENV.HALO_CONSOLE_LOG = 'all';
+    }],
     print: (text) => console.log(text),
     printErr: (text) => console.log(text),
     // a frame from the game's thread (web_platform.c web_present_frame)

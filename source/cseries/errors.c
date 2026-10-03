@@ -130,6 +130,14 @@ static void write_to_debug_file(
 	FILE *file = debug_file;
 	char prefix[32];
 
+#ifdef HALO_WEB
+	/* the browser's console is the log (port/web) */
+	(void)date;
+	(void)file;
+	(void)prefix;
+	fputs(string, stderr);
+	return;
+#endif
 	if (!file)
 	{
 		FILE *opened = fopen("d:\\debug.txt", "a+b");
@@ -152,7 +160,11 @@ static void write_to_debug_file(
 	prefix[0] = 0;
 	if (date)
 	{
+#ifdef HALO_WEB
+		time_t timeptr; /* 64 bits in WebAssembly, where time() writes it */
+#else
 		long timeptr;
+#endif
 		struct tm *_time;
 
 		time(&timeptr);

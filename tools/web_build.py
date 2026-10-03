@@ -103,7 +103,7 @@ LINK_FLAGS = [
     "-sGL_ENABLE_GET_PROC_ADDRESS",
     # what the page uses (port/web/shell/page.js)
     "-sEXPORTED_FUNCTIONS=_main,_malloc,_free",
-    "-sEXPORTED_RUNTIME_METHODS=HEAP32,HEAPU8,UTF8ToString",
+    "-sEXPORTED_RUNTIME_METHODS=HEAP32,HEAPU8,UTF8ToString,ENV",
 ]
 
 
