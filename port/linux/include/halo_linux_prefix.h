@@ -10,8 +10,14 @@ byte-for-byte identical to what the matching MSVC build compiles.
 #ifndef __HALO_LINUX_PREFIX_H
 #define __HALO_LINUX_PREFIX_H
 
-#if !defined(__i386__) && !defined(HALO_ANDROID)
+#if !defined(__i386__) && !defined(HALO_ANDROID) && !defined(HALO_WEB)
 #error the Linux port targets 32-bit x86: game data structures assume 32-bit pointers
+#endif
+
+/* the OpenGL ES renderer (port/linux/src/d3d8_gl.c): Android's and the
+browser's (port/web) */
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+#define HALO_GLES 1
 #endif
 
 /* ---------- XDK architecture selection (MSVC predefines these) */

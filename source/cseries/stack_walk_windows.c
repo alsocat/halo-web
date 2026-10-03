@@ -760,6 +760,11 @@ static unsigned long walk_up(
 {
 	unsigned long routine_address = 0;
 
+#ifdef HALO_WEB
+	/* WebAssembly keeps return addresses out of the memory: there is no
+	frame chain to follow */
+	walk_up_current_frame = 0;
+#endif
 	if (walk_up_current_frame)
 	{
 #ifdef HALO_ANDROID

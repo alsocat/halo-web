@@ -399,8 +399,14 @@ static void CALLBACK cache_file_read_io_completion_routine(
 	unsigned long error_code,
 	unsigned long bytes_transferred,
 	OVERLAPPED *overlapped);
+#ifdef HALO_WEB
+/* WebAssembly calls a thread's function by its exact type */
+static DWORD WINAPI cache_file_windows_thread_proc(
+	LPVOID parameter);
+#else
 static void cache_file_windows_thread_proc(
 	void);
+#endif
 static void cache_file_windows_thread_create(
 	void);
 static struct cache_file_request *cache_request_get(
@@ -1063,8 +1069,13 @@ static void CALLBACK cache_file_read_io_completion_routine(
 	return;
 }
 
+#ifdef HALO_WEB
+static DWORD WINAPI cache_file_windows_thread_proc(
+	LPVOID parameter)
+#else
 static void cache_file_windows_thread_proc(
 	void)
+#endif
 {
 	while (TRUE)
 	{

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # root build script: writes build.ninja for the native ports (Linux, Windows,
-# Android)
+# Android) and the browser build
 
 import argparse
 import io
@@ -14,6 +14,7 @@ from tools import ninja_syntax
 from tools.android_build import android_configure_inputs, generate_android_build
 from tools.linux_build import generate_linux_build, linux_configure_inputs
 from tools.windows_build import generate_windows_build, windows_configure_inputs
+from tools.web_build import generate_web_build, web_configure_inputs
 
 # arguments
 parser = argparse.ArgumentParser()
@@ -112,6 +113,7 @@ n.newline()
 generate_linux_build(n, sln)
 generate_android_build(n, sln)
 generate_windows_build(n, sln)
+generate_web_build(n, sln)
 
 n.comment("Reconfigure on change")
 n.rule(
@@ -129,6 +131,7 @@ n.build(
         *linux_configure_inputs(),
         *android_configure_inputs(),
         *windows_configure_inputs(),
+        *web_configure_inputs(),
     ],
 )
 n.newline()

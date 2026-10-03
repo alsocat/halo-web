@@ -280,6 +280,9 @@ static const struct config_setting config_settings[] =
 
 #ifdef HALO_ANDROID
 #define CONFIG_PLATFORM _platform_android
+#elif defined(HALO_WEB)
+/* a page has both: the desktop's mouse and keyboard, and a phone's screen */
+#define CONFIG_PLATFORM _platform_all
 #else
 #define CONFIG_PLATFORM _platform_desktop
 #endif
@@ -300,6 +303,16 @@ static pthread_mutex_t config_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void config_path(char *path, size_t size)
 {
+#ifdef HALO_WEB
+	/* with the saves, in the browser's storage (port/web/src/web_platform.c),
+	which the first look at the settings mounts */
+	extern void web_platform_initialize(void);
+	const char *root = getenv("HALO_SAVE_ROOT");
+
+	web_platform_initialize();
+	snprintf(path, size, "%s/config.toml", root && *root ? root : ".");
+	return;
+#endif
 #ifdef HALO_ANDROID
 	/* the data folder, which the app names (port/android/host/host_main.c) */
 	const char *root = getenv("HALO_DATA_ROOT");

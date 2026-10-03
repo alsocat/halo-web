@@ -1,0 +1,67 @@
+:root {
+  --background: #000;
+  --text: #d8e2ee;
+  --muted: #7d8a99;
+  --error: #ff8a7a;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--text);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* the frames the game posts (port/web/src/web_platform.c) */
+#screen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: block;
+}
+
+/* the game's own canvas, which it draws on in its thread: unseen, on top,
+taking the mouse and the keyboard for SDL */
+#canvas {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  opacity: 0;
+  outline: none;
+}
+
+#status {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+#status.hidden {
+  display: none;
+}
+
+#status-detail {
+  color: var(--muted);
+  max-width: 40em;
+  white-space: pre-wrap;
+}
+
+#status.error #status-text {
+  color: var(--error);
+}

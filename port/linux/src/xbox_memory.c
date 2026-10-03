@@ -20,6 +20,9 @@ Xbox kernel does.
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef HALO_WEB
+#include <emscripten/heap.h>
+#endif
 
 #define PAGE_SIZE_BYTES 0x1000UL
 #define CONTIGUOUS_PAGE_COUNT (PLATFORM_CONTIGUOUS_SIZE / PAGE_SIZE_BYTES)
@@ -48,6 +51,21 @@ static int protection_to_host(DWORD protect)
 __attribute__((constructor(101)))
 static void contiguous_arena_reserve(void)
 {
+#ifdef HALO_WEB
+	/* WebAssembly's memory is one block with no page mapping: grow it past
+	the window, which the C heap (growing up from far below) never reaches */
+	if (emscripten_get_heap_size() >= PLATFORM_CONTIGUOUS_BASE + PLATFORM_CONTIGUOUS_SIZE ||
+		emscripten_resize_heap(PLATFORM_CONTIGUOUS_BASE + PLATFORM_CONTIGUOUS_SIZE))
+	{
+		arena_reserved = TRUE;
+	}
+	else
+	{
+		platform_log("cannot grow the memory to the Xbox contiguous memory window at 0x%08lx",
+			PLATFORM_CONTIGUOUS_BASE);
+	}
+	return;
+#endif
 	void *wanted = (void *)PLATFORM_CONTIGUOUS_BASE;
 	void *result = mmap(wanted, PLATFORM_CONTIGUOUS_SIZE, PROT_NONE,
 		MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
@@ -141,12 +159,16 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 	address = (void *)(PLATFORM_CONTIGUOUS_BASE + first * PAGE_SIZE_BYTES);
 	memory_watch_forget(address, count * PAGE_SIZE_BYTES);
 	/* map fresh zeroed pages over the reservation */
+#ifdef HALO_WEB
+	memset(address, 0, count * PAGE_SIZE_BYTES);
+#else
 	if (mmap(address, count * PAGE_SIZE_BYTES, protection_to_host(protect),
 		MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != address)
 	{
 		pthread_mutex_unlock(&arena_lock);
 		return NULL;
 	}
+#endif
 	for (page = first; page < first + count; page++)
 		page_protection[page] = protect;
 	block_page_count[first] = count;
@@ -166,8 +188,10 @@ void platform_contiguous_free(void *address)
 	if (count)
 	{
 		memory_watch_forget(address, count * PAGE_SIZE_BYTES);
+#ifndef HALO_WEB
 		mmap(address, count * PAGE_SIZE_BYTES, PROT_NONE,
 			MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+#endif
 		for (page = first; page < first + count; page++)
 			page_protection[page] = 0;
 		block_page_count[first] = 0;
@@ -209,11 +233,14 @@ BOOL WINAPI VirtualProtect(LPVOID address, SIZE_T size, DWORD new_protect, PDWOR
 		*old_protect = platform_is_contiguous(address) ?
 			page_protection[(start - PLATFORM_CONTIGUOUS_BASE) / PAGE_SIZE_BYTES] : PAGE_READWRITE;
 	memory_watch_forget((void *)start, end - start);
+#ifndef HALO_WEB
+	/* (WebAssembly has no page protection) */
 	if (mprotect((void *)start, end - start, protection_to_host(new_protect)) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
 		return FALSE;
 	}
+#endif
 	if (platform_is_contiguous((void *)start))
 	{
 		unsigned long page;

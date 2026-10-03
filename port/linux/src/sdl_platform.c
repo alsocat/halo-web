@@ -61,6 +61,14 @@ void updater_start(void);
 void updater_poll(SDL_Window *window);
 #endif
 
+#ifdef HALO_WEB
+/* port/web/src/web_platform.c */
+void web_platform_initialize(void);
+BOOL web_display_size(long *width, long *height);
+void web_present_frame(void);
+void web_process_queued_calls(void);
+#endif
+
 BOOL platform_sdl_initialize(void)
 {
 	if (platform_sdl_started)
@@ -91,6 +99,11 @@ BOOL platform_sdl_initialize(void)
 		return FALSE;
 	}
 	platform_sdl_started = TRUE;
+#ifdef HALO_WEB
+	/* the server's maps and the browser's storage, before the game looks
+	for them */
+	web_platform_initialize();
+#endif
 #ifndef HALO_ANDROID
 	/* found (or offered to the player, platform_offer_game_data) before the
 	game's window opens */
@@ -325,6 +338,10 @@ int halo_interpolation_enabled(void)
 is hidden */
 static BOOL platform_fullscreen_setting(void)
 {
+#ifdef HALO_WEB
+	/* (the page fills the browser's window; F11 still asks for fullscreen) */
+	return FALSE;
+#endif
 	return !config_boolean("debug.hidden_window") && config_boolean("display.fullscreen");
 }
 
@@ -335,6 +352,10 @@ BOOL platform_screen_mode(long *width, long *height)
 	SDL_DisplayID display;
 	const SDL_DisplayMode *mode;
 
+#ifdef HALO_WEB
+	/* the page's canvas, in the device's pixels (port/web/shell) */
+	return web_display_size(width, height);
+#endif
 	if (platform_window ? !(SDL_GetWindowFlags(platform_window) & SDL_WINDOW_FULLSCREEN) :
 		!platform_fullscreen_setting() || !platform_sdl_initialize())
 	{
@@ -362,7 +383,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	if (scale < 1)
 		scale = 1;
 
-#ifdef HALO_ANDROID
+#ifdef HALO_GLES
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
@@ -403,7 +424,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 		return FALSE;
 	}
 	platform_gl_context = SDL_GL_CreateContext(platform_window);
-#ifdef HALO_ANDROID
+#ifdef HALO_GLES
 	/* ES 3.2 where the driver has it, otherwise the renderer makes do with
 	3.0 plus extensions */
 	if (!platform_gl_context)
@@ -432,6 +453,16 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 
 void platform_video_drawable_size(int *width, int *height)
 {
+#ifdef HALO_WEB
+	long display_width, display_height;
+
+	if (web_display_size(&display_width, &display_height))
+	{
+		*width = (int)display_width;
+		*height = (int)display_height;
+		return;
+	}
+#endif
 	SDL_GetWindowSizeInPixels(platform_window, width, height);
 }
 
@@ -473,6 +504,12 @@ void platform_video_swap(void)
 
 #endif
 	SDL_GL_SwapWindow(platform_window);
+#ifdef HALO_WEB
+	/* the page shows the frame, and paces the game to its display's
+	refresh as vsync would */
+	web_present_frame();
+	return;
+#endif
 #ifndef HALO_ANDROID
 	interval = frame_interval_ns();
 	if (!interval)
@@ -805,6 +842,11 @@ void platform_pump_events(void)
 	platform_show_pending_message();
 #ifndef HALO_ANDROID
 	updater_poll(platform_window);
+#endif
+#ifdef HALO_WEB
+	/* the browser's input events, which SDL's callbacks queue for this
+	thread */
+	web_process_queued_calls();
 #endif
 	pthread_mutex_lock(&input_lock);
 	while (SDL_PollEvent(&event))

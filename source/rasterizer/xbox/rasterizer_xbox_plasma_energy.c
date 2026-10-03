@@ -111,7 +111,7 @@ typedef char pixel_shader_definition_size_assert[
 
 /* ---------- prototypes */
 
-void rasterizer_set_texture(
+union point2d *rasterizer_set_texture(
 	short stage,
 	short bitmap_type,
 	short bitmap_index,
