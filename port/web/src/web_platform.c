@@ -54,6 +54,10 @@ static void web_settings(void)
 	/* the game's log goes to the browser's console, not over the game
 	(the page's ?debug shows it all on screen too: port/web/shell/page.js) */
 	setenv("HALO_CONSOLE_LOG", "none", 0);
+	/* SDL's swap would return to the browser too in the JSPI engine, which
+	then showed the frame, and then the cleared canvas at this platform's
+	own return (web_present_frame): every other frame black */
+	setenv("SDL_EMSCRIPTEN_ASYNCIFY", "0", 1);
 }
 
 /* ---------- files */
