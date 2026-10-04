@@ -17,6 +17,9 @@ four-way screen (press START to join, each picking a profile) instead of the
 two co-op profile screens; once one goes on, the campaign's level list, with
 each player who joined in turn a co-op player.
 
+ONLINE GAMES lists the campaigns in progress on the site too (online co-op:
+port/web/game/lockstep.c), as "<host> CO-OP"; joining one joins that game.
+
 DELAY GAME: only the host's pregame screen offers it (X); the host ignores
 the others' (networking/network_server_message_handler.c).
 
@@ -43,6 +46,7 @@ the map of the menus the changes below are made against.
 #include "main/main.h"
 #include "networking/network_connection.h"
 #include "networking/network_game_globals.h"
+#include "text/unicode.h"
 #include "saved games/player_profile.h"
 #include "saved games/saved_game_files.h"
 #include "tag_files/tag_files.h"
@@ -741,6 +745,88 @@ static boolean coop_start(struct widget_instance *widget, struct event_record *e
 	return TRUE;
 }
 
+/* ---------- online co-op in ONLINE GAMES */
+
+/* the game client's list of games found (network_client_manager.c's
+network_advertised_game, ui_widget_game_data_input_functions.c's view) */
+struct web_advertised_game
+{
+	unsigned long coop_magic;
+	short coop_session;
+	byte padding06[0x2C - 0x06];
+	/* (a game not heard from for 6 seconds is not listed) */
+	unsigned long update_time;
+	wchar_t game_name[16];
+	long padding50;
+	char map_name[0x80];
+	short engine_type;
+	short machine_count;
+	word player_count;
+	short maximum_player_count;
+	short score_limit;
+	short platform;
+	boolean open;
+	boolean valid;
+	boolean has_teams;
+	boolean oddball_variant;
+};
+
+typedef char web_advertised_game_size_check[sizeof(struct web_advertised_game) == 0xE4 ? 1 : -1];
+
+enum
+{
+	WEB_ADVERTISED_GAMES = 9,
+	/* the list's last places are the co-op games' */
+	WEB_COOP_LIST_FIRST = 6,
+	WEB_COOP_MAGIC = 0x504F4F43
+};
+
+struct web_advertised_game *network_game_client_get_available_games(struct network_game_client *client);
+boolean web_lockstep_session(short index, unsigned long *address, wchar_t *host_name, char *map_name, short *player_count);
+/* the co-op games seen, in the list's last places, each frame */
+static void online_games_list_coop(void)
+{
+	struct network_game_client *client = global_network_game_client_get();
+	struct web_advertised_game *games;
+	short session = 0;
+	short slot;
+
+	if (!client)
+		return;
+	games = network_game_client_get_available_games(client);
+	for (slot = WEB_COOP_LIST_FIRST; slot < WEB_ADVERTISED_GAMES; slot++)
+	{
+		struct web_advertised_game *game = &games[slot];
+		wchar_t host_name[12];
+		char map_name[64];
+		short player_count;
+
+		while (session < 8 && !web_lockstep_session(session, NULL, host_name, map_name, &player_count))
+			session++;
+		if (session >= 8)
+		{
+			if (game->coop_magic == WEB_COOP_MAGIC)
+				memset(game, 0, sizeof(*game));
+			continue;
+		}
+		memset(game, 0, sizeof(*game));
+		game->coop_magic = WEB_COOP_MAGIC;
+		game->coop_session = session;
+		game->update_time = system_milliseconds();
+		usnprintf(game->game_name, NUMBEROF(game->game_name), L"%s CO-OP", host_name);
+		game->game_name[15] = 0;
+		strncpy(game->map_name, map_name, sizeof(game->map_name) - 1);
+		game->engine_type = NONE;
+		game->machine_count = player_count;
+		game->player_count = player_count;
+		game->maximum_player_count = 4;
+		game->platform = 0;
+		game->open = player_count < 4;
+		game->valid = TRUE;
+		session++;
+	}
+}
+
 /* ---------- DELAY GAME, the host's alone */
 
 /* the pregame screen's button key without X =DELAY GAME where this machine
@@ -1100,6 +1186,7 @@ boolean web_menus_event_function(struct widget_instance *widget, struct event_re
 		return TRUE;
 	case WEB_FUNCTION_COOP_START:
 		return coop_start(widget, event, widget_deleted);
+
 	}
 	platform_log("web menus: no function %d", function_index);
 	return FALSE;
@@ -1150,7 +1237,7 @@ boolean web_menus_load_first_screen(void)
 {
 	creator_restore();
 	/* (not for the network and co-op tests, which start games at once) */
-	if (creator.launched || getenv("HALO_NETWORK_TEST") || getenv("HALO_COOP_TEST"))
+	if (creator.launched || getenv("HALO_NETWORK_TEST") || getenv("HALO_COOP_TEST") || getenv("HALO_LOCKSTEP_JOIN"))
 		return FALSE;
 	if (filesystem_check_thread_is_active())
 	{
@@ -1220,6 +1307,7 @@ void web_menus_frame(void)
 		main_screen_shell_load();
 	}
 	place_online_games_title();
+	online_games_list_coop();
 	/* (the ui.map is loaded again on returning from a game) */
 	if (frames++ % 15 == 0)
 		apply_changes();

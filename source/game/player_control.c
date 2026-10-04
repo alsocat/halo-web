@@ -361,6 +361,10 @@ static void player_action_clear(
 	struct input_blob *input);
 static void player_control_action_test_check_reset_input_blob(
 	struct input_blob *input);
+#ifdef HALO_WEB
+boolean web_lockstep_active(void);
+static unsigned long web_local_action_flags;
+#endif
 static void get_local_player_input_blob(
 	short local_player_index,
 	real time_delta_sec,
@@ -1529,6 +1533,22 @@ static void get_local_player_input_blob(
 		}
 	}
 
+#ifdef HALO_WEB
+	/* online co-op: this machine's tested actions go to the session's frame,
+	which every machine's game takes them from (player_control_web_apply_
+	action_flags); the scripts that test them are the game's */
+	if (web_lockstep_active())
+	{
+		unsigned long before = player_control_globals->action_flags;
+
+		player_control_action_test_check_reset_input_blob(input);
+		web_local_action_flags |= player_control_globals->action_flags & ~before;
+		if (input->accept)
+			web_local_action_flags |= FLAG(_player_control_accept_bit);
+		player_control_globals->action_flags = before;
+	}
+	else
+#endif
 	player_control_action_test_check_reset_input_blob(input);
 	match_assert_valid_real(
 		"c:\\halo\\SOURCE\\game\\player_control.c",
@@ -1667,7 +1687,12 @@ static void player_control_action_test_check_reset_input_blob(
 {
 	struct player_control_globals_data *globals;
 
+#ifdef HALO_WEB
+	/* (online co-op: every machine's accept, in the session's frame) */
+	if (input->accept && cinematic_can_be_skipped() && !web_lockstep_active())
+#else
 	if (input->accept && cinematic_can_be_skipped())
+#endif
 	{
 		main_skip_cinematic();
 	}
@@ -2017,3 +2042,26 @@ static void player_control_modify_desired_angles(
 
 	return;
 }
+
+#ifdef HALO_WEB
+/* online co-op (port/web/game/lockstep.c): this machine's tested actions
+since it last gave them */
+unsigned long player_control_web_take_action_flags(
+	void)
+{
+	unsigned long flags = web_local_action_flags;
+
+	web_local_action_flags = 0;
+	return flags;
+}
+
+/* a tick's tested actions, every machine's: the action tests' state, and a
+cinematic skipped */
+void player_control_web_apply_action_flags(
+	unsigned long flags)
+{
+	player_control_globals->action_flags |= flags;
+	if (TEST_FLAG(flags, _player_control_accept_bit) && cinematic_can_be_skipped())
+		main_skip_cinematic();
+}
+#endif

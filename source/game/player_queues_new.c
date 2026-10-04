@@ -753,9 +753,67 @@ static void web_lockstep_test_actions(
 static boolean update_client_dequeue_queue(
 	struct player_action *actions);
 
+/* online co-op's (port/web/game/lockstep.c) */
+boolean web_lockstep_active(void);
+boolean web_lockstep_tick_actions(struct player_action *actions, long count);
+
+/* this machine's local player's action for the tick: what its controls
+gave since the last (the button presses held over), or the test's script */
+void update_client_web_local_action(
+	short local_player_index,
+	struct player_action *action)
+{
+	if (web_lockstep_test())
+	{
+		struct player_action scripted[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
+
+		web_lockstep_test_actions(scripted);
+		*action = scripted[local_player_index];
+		return;
+	}
+	*action = update_client_globals.saved_action_collection.actions[local_player_index];
+}
+
+/* online co-op's tick: every player's action from the session's frame,
+through the queues' latches as ever */
+static boolean update_client_dequeue_lockstep(
+	struct player_action *actions)
+{
+	struct player_action frame[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
+	struct update_client_queue_datum *queue = (struct update_client_queue_datum *)update_client_globals.queues->data;
+	short queue_index;
+
+	if (!web_lockstep_tick_actions(frame, HALO_PORT_MAXIMUM_NETWORK_PLAYERS))
+		return FALSE;
+	for (queue_index = 0; queue_index < update_client_globals.queues->count; ++queue_index, ++queue)
+	{
+		struct player_action action = frame[queue_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS ? queue_index : 0];
+
+		if (queue_index >= HALO_PORT_MAXIMUM_NETWORK_PLAYERS)
+		{
+			csmemset(&action, 0, sizeof(action));
+			action.desired_weapon_index = NONE;
+			action.desired_grenade_index = NONE;
+			action.desired_zoom_level = NONE;
+		}
+		actions[queue_index].control_flags = action.control_flags & ~queue->latched_control_flags;
+		queue->latched_control_flags = action.control_flags & LATCHED_CONTROL_FLAGS;
+		actions[queue_index].desired_facing = action.desired_facing;
+		actions[queue_index].throttle = action.throttle;
+		actions[queue_index].primary_trigger = action.primary_trigger;
+		actions[queue_index].desired_weapon_index = action.desired_weapon_index;
+		actions[queue_index].desired_grenade_index = action.desired_grenade_index;
+		actions[queue_index].desired_zoom_level = action.desired_zoom_level;
+	}
+	update_client_globals.next_update_number_to_dequeue += 1;
+	return TRUE;
+}
+
 boolean update_client_dequeue(
 	struct player_action *actions)
 {
+	if (web_lockstep_active())
+		return update_client_dequeue_lockstep(actions);
 	if (web_lockstep_test())
 	{
 		struct player_action queued[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];

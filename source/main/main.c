@@ -750,6 +750,11 @@ boolean gamepad_button_is_down(
 static void create_local_players(
 	void)
 {
+#ifdef HALO_WEB
+	/* (online co-op: every machine makes the session's players, the same:
+	port/web/game/lockstep.c) */
+	extern boolean web_lockstep_create_players(void);
+#endif
 	short used_controllers[MAXIMUM_GAMEPADS];
 	short default_controllers[MAXIMUM_GAMEPADS];
 	short desired_controllers[MAXIMUM_GAMEPADS];
@@ -758,6 +763,10 @@ static void create_local_players(
 	long player;
 	short gamepad_index;
 
+#ifdef HALO_WEB
+	if (!main_globals.main_menu_scenario_loaded && web_lockstep_create_players())
+		return;
+#endif
 	if (main_globals.main_menu_scenario_loaded)
 	{
 		player = player_new(0, NONE, 0, NULL);
@@ -1443,6 +1452,11 @@ static void main_new_map(
 
 #ifdef HALO_WEB
 	random_math_web_end_game_tick();
+	{
+		extern void web_lockstep_map_loaded(void);
+
+		web_lockstep_map_loaded();
+	}
 #endif
 	main_globals.reset_map = FALSE;
 	main_globals.defer_map_change = FALSE;
@@ -1976,7 +1990,20 @@ static void main_respawn_private(
 {
 	if (!game_time_get_paused() && !cinematic_in_progress())
 	{
+#ifdef HALO_WEB
+		/* port (online co-op): the wait counts the game's ticks, not the
+		frames, which each machine draws at its own rate */
+		static long last_respawn_tick = NONE;
+
+		if (game_time_get() != last_respawn_tick)
+		{
+			last_respawn_tick = game_time_get();
+			main_globals.respawn_timer++;
+		}
+		if (main_globals.respawn_timer > 90 && players_respawn_coop())
+#else
 		if (main_globals.respawn_timer++ > 90 && players_respawn_coop())
+#endif
 		{
 			main_globals.respawn = FALSE;
 			main_globals.respawn_timer = 0;
@@ -3204,6 +3231,14 @@ void main_loop(
 
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+#ifdef HALO_WEB
+			/* online co-op's session (port/web/game/lockstep.c) */
+			{
+				extern void web_lockstep_update(void);
+
+				web_lockstep_update();
+			}
+#endif
 			connection = main_globals.connection;
 			if (connection==_game_connection_network_client)
 			{
@@ -3274,6 +3309,14 @@ void main_loop(
 					if (halo_interpolation_enabled())
 						render_frame = main_globals.main_menu_scenario_loaded || main_globals.halt_time_scale;
 					render_frame &= !game_engine_running() || game_time_get()>=3;
+#ifdef HALO_WEB
+					/* (a guest behind the host's frames catches up undrawn) */
+					{
+						extern boolean web_lockstep_catching_up(void);
+
+						render_frame &= !web_lockstep_catching_up();
+					}
+#endif
 
 					collision_log_continue_period(1);
 					director_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);

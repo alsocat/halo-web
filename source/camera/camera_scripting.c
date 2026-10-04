@@ -593,3 +593,26 @@ static void camera_script_web_timer_set(
 	camera_script_web_end_tick = game_time_get() + (long)(camera_script_globals.timer * 30.f);
 }
 #endif
+
+#ifdef HALO_WEB
+/* online co-op's state transfers (port/web/game/lockstep.c) */
+long camera_script_web_state_size(
+	void)
+{
+	return (long)(sizeof(camera_script_globals) + sizeof(camera_script_web_end_tick));
+}
+
+void camera_script_web_get_state(
+	void *buffer)
+{
+	csmemcpy(buffer, &camera_script_globals, sizeof(camera_script_globals));
+	csmemcpy((byte *)buffer + sizeof(camera_script_globals), &camera_script_web_end_tick, sizeof(camera_script_web_end_tick));
+}
+
+void camera_script_web_set_state(
+	void const *buffer)
+{
+	csmemcpy(&camera_script_globals, buffer, sizeof(camera_script_globals));
+	csmemcpy(&camera_script_web_end_tick, (byte const *)buffer + sizeof(camera_script_globals), sizeof(camera_script_web_end_tick));
+}
+#endif

@@ -1917,6 +1917,16 @@ static boolean network_game_join_game_from_server_list(
 			if ((word)generated_count > (word)zero)
 			{
 				server = ((byte **)widget->generated_list)[widget->data3C.selected_index];
+#ifdef HALO_WEB
+				/* online co-op's games in the list (port/web/game/web_menus.c):
+				joined through its session (port/web/game/lockstep.c) */
+				if (*(unsigned long *)server == 0x504F4F43)
+				{
+					extern boolean web_lockstep_join(short index);
+
+					return web_lockstep_join(*(short *)(server + 4));
+				}
+#endif
 				if (server[0xE0] == TRUE)
 				{
 					if (*(short *)(server + 0xDE) == zero)

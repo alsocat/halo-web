@@ -110,6 +110,7 @@ symbols in this file:
 #include "memory/data.h"
 #include "cutscene/cinematics.h"
 #include "units/units.h"
+#include "game/players.h"
 #include "game_sound.h"
 #include "sound_manager.h"
 #include "observer.h"
@@ -500,6 +501,10 @@ static boolean game_state_web_part_own(
 		"decals", "decal globals", "decal vertices", "structure decals",
 		/* (and what the game's frames move, game_frame_update: the widgets) */
 		"widget", "flag", "antenna",
+		/* (and each machine's local players' own: their HUD, first person
+		weapons, controls and screen effects) */
+		"hud messaging", "hud unit interface", "hud weapon interface", "hud nav points",
+		"first person weapons", "player control globals", "player effects",
 	};
 	long index;
 
@@ -595,6 +600,33 @@ static void game_state_web_part_checksum(
 		/* (the map's structure; its fog and sound environment are where this
 		machine's camera is) */
 		crc_checksum_buffer(crc, address, offsetof(struct scenario_globals, atmospheric_fog));
+	}
+	else if (!strcmp(name, "players"))
+	{
+		/* (each player's local player: whose machine it plays on) */
+		struct data_iterator iterator;
+		struct player_datum *player;
+
+		data_iterator_new(&iterator, player_data);
+		while ((player = data_iterator_next(&iterator)) != NULL)
+		{
+			struct player_datum copy = *player;
+
+			copy.local_player_index = NONE;
+			crc_checksum_buffer(crc, &copy, sizeof(copy));
+		}
+	}
+	else if (!strcmp(name, "players globals"))
+	{
+		/* (this machine's local players, and what they see) */
+		struct players_globals copy = *(struct players_globals *)address;
+
+		csmemset(copy.local_players, 0, sizeof(copy.local_players));
+		csmemset(copy.dead_units, 0, sizeof(copy.dead_units));
+		copy.local_player_count = 0;
+		copy.bsp_switch_state = 0;
+		csmemset(copy.combined_pvs_local, 0, sizeof(copy.combined_pvs_local));
+		crc_checksum_buffer(crc, &copy, sizeof(copy));
 	}
 	else if (!strcmp(name, "effect"))
 	{
@@ -909,3 +941,56 @@ void game_state_initialize(
 }
 
 /* ---------- private code */
+
+#ifdef HALO_WEB
+/* ---------- online co-op (port/web/game/lockstep.c) */
+
+/* the game's state's hash: every machine's the same in step */
+unsigned long game_state_web_hash(
+	void)
+{
+	unsigned long whole;
+	long index;
+
+	crc_new(&whole);
+	for (index = 0; index < web_game_state_part_count; index++)
+	{
+		if (!game_state_web_part_own(web_game_state_parts[index].name))
+			game_state_web_part_checksum(&whole, index);
+	}
+	return whole;
+}
+
+/* the game state, to give a machine that joins (or falls out of step) */
+long game_state_web_snapshot_size(
+	void)
+{
+	return game_state_globals.cpu_allocation_size + game_state_globals.gpu_allocation_size;
+}
+
+void game_state_web_snapshot(
+	byte *buffer)
+{
+	csmemcpy(buffer, game_state_globals.base_address, game_state_globals.cpu_allocation_size);
+	csmemcpy(buffer + game_state_globals.cpu_allocation_size,
+		(byte *)game_state_globals.base_address + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
+		game_state_globals.gpu_allocation_size);
+}
+
+/* another machine's game state in place of this one's, as a checkpoint's
+or a core's is loaded */
+boolean game_state_web_restore(
+	byte const *buffer,
+	long size)
+{
+	if (size != game_state_web_snapshot_size())
+		return FALSE;
+	game_state_call_before_load_procs();
+	csmemcpy(game_state_globals.base_address, buffer, game_state_globals.cpu_allocation_size);
+	csmemcpy((byte *)game_state_globals.base_address + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
+		buffer + game_state_globals.cpu_allocation_size,
+		game_state_globals.gpu_allocation_size);
+	game_state_call_after_load_procs();
+	return TRUE;
+}
+#endif

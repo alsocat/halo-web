@@ -441,6 +441,15 @@ void game_time_update(
 			match_assert("c:\\halo\\SOURCE\\game\\game_time.c", 306,
 				game_time_globals->leftover_dt>=0.f && game_time_globals->leftover_dt<100.f);
 
+#ifdef HALO_WEB
+			/* online co-op (port/web/game/lockstep.c): the ticks the session
+			allows (a guest's as the host's frames come, one each frame) */
+			{
+				extern long web_lockstep_ticks(long ticks_elapsed);
+
+				ticks_elapsed = web_lockstep_ticks(ticks_elapsed);
+			}
+#endif
 			if (ticks_elapsed > 0)
 			{
 				long final_local_time;
@@ -487,8 +496,11 @@ void game_time_update(
 							extern boolean web_lockstep_test(void);
 							extern void game_state_web_fingerprint(long tick);
 
+							extern void web_lockstep_after_tick(void);
+
 							if (web_lockstep_test() && game_time_get() % 30 == 0)
 								game_state_web_fingerprint(game_time_get());
+							web_lockstep_after_tick();
 						}
 #endif
 					}
