@@ -356,6 +356,10 @@ char *csprintf(
 #ifdef HALO_RELEASE
 __thread boolean display_assert_skipped = FALSE;
 
+#ifdef HALO_WEB
+#include <emscripten.h>
+#endif
+
 /* port: a release build carries on past a failed assertion (cseries.h),
 but notes it in debug.txt, as a debug build does before it stops: each
 place's first failure, then its 10th, 100th, 1000th and so on with the
@@ -414,6 +418,11 @@ void release_assert_failed(
 	{
 		error(_error_log, "EXCEPTION %s in %s,#%ld: %s (release build)", fatal ? "assert" : "warn",
 			file, line, information ? information : "<no reason given>");
+#ifdef HALO_WEB
+		/* the browser's console: where the first failure came from (the
+		build keeps its functions' names) */
+		emscripten_log(EM_LOG_CONSOLE | EM_LOG_WARN | EM_LOG_C_STACK, "%s,#%ld failed", file, line);
+#endif
 	}
 }
 #endif
