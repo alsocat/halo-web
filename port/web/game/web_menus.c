@@ -12,12 +12,21 @@ and netcode v2 joins games in progress. The list's title (a picture, SYSTEM
 LINK GAMES) is ONLINE GAMES, spliced from its own letters and EDIT PROFILE
 SETTINGS' O as the game loads it.
 
+COOPERATIVE PLAY: two to four players, who join on split screen's
+four-way screen (press START to join, each picking a profile) instead of the
+two co-op profile screens; once one goes on, the campaign's level list, with
+each player who joined in turn a co-op player.
+
 DELAY GAME: only the host's pregame screen offers it (X); the host ignores
 the others' (networking/network_server_message_handler.c).
 
 The creator: on the site's first visit (no player profile yet) the game opens
 on a short profile screen (name, colour, save) with the name being typed,
 then the main menu; the profile is the player's from then on.
+
+?HALO_COOP_TEST=<level>[:<players>] (a10, b30, ...) starts that campaign
+level as soon as the menus are up, cooperative with that many local players
+(4 by default), each on the controller of their number.
 
 ?HALO_WEB_DUMP_UI=1 logs every menu widget of the loaded map: its name, text,
 event handlers (what each button does and the widget it opens) and children,
@@ -31,6 +40,8 @@ the map of the menus the changes below are made against.
 #include "interface/event_manager.h"
 #include "interface/player_ui.h"
 #include "interface/virtual_keyboard.h"
+#include "main/main.h"
+#include "networking/network_connection.h"
 #include "networking/network_game_globals.h"
 #include "saved games/player_profile.h"
 #include "saved games/saved_game_files.h"
@@ -119,6 +130,7 @@ typedef char web_ui_event_handler_size_check[sizeof(struct web_ui_event_handler)
 typedef char web_ui_child_size_check[sizeof(struct web_ui_child) == 0x50 ? 1 : -1];
 
 static void string_text(long string_list_index, short string_index, char *text, int size);
+static void coop_change_menus(void);
 static boolean make_online_games_title(void);
 
 /* ---------- the changes */
@@ -129,8 +141,12 @@ enum
 	(interface/ui_widget_event_handler_functions.c hands them here) */
 	WEB_FUNCTION_ONLINE_PLAY = 200,
 	WEB_FUNCTION_CREATOR_SAVE,
+	WEB_FUNCTION_COOP_JOIN,
+	WEB_FUNCTION_SPLIT_SCREEN_JOIN,
+	WEB_FUNCTION_COOP_START,
 
 	/* the game's */
+	FUNCTION_COOP_GAME_INITIALIZE = 22,
 	FUNCTION_PLAYER_PROFILE_SAVE_CHANGES = 67,
 	FUNCTION_DISPLAY_ERROR_IF_NO_NETWORK_CONNECTION = 91,
 
@@ -145,6 +161,12 @@ enum
 #define SERVER_LIST_SCREEN MULTIPLAYER_SCREEN "connected\\server_list\\server_list_screen"
 #define FOUND_GAMES_HEADER MULTIPLAYER_SCREEN "connected\\server_list\\header_found_games"
 #define LARGE_FONT "ui\\large_ui"
+#define COOP_ITEM MULTIPLAYER_SCREEN "multiplayer_type_coop_item"
+#define SPLIT_ITEM MULTIPLAYER_SCREEN "multiplayer_type_split_item"
+#define SPLIT_JOIN_SCREEN MULTIPLAYER_SCREEN "split_screen\\4way_profile_select\\4way_start2join_screen"
+#define SPLIT_PROFILE_SELECTED MULTIPLAYER_SCREEN "split_screen\\4way_profile_select\\qtr_screen_profile_selected"
+#define SPLIT_MAP_SELECT MULTIPLAYER_SCREEN "split_screen\\splitscreen_map_select_wrapper"
+#define SOLO_LEVEL_SELECT "ui\\shell\\main_menu\\solo_level_select\\solo_level_select_screen"
 #define PREGAME_BUTTON_KEY MULTIPLAYER_SCREEN "connected\\pregame\\mp_button_key"
 #define PROFILE_EDIT "ui\\shell\\main_menu\\settings_select\\player_setup\\"
 #define CREATOR_SCREEN PROFILE_EDIT "create_and_edit_player_profile_screen"
@@ -204,6 +226,7 @@ static void apply_changes(void)
 	descriptions = tag_get(UNICODE_STRING_LIST_TAG, descriptions_index);
 	if (conn->event_handlers.count && ((struct web_ui_event_handler *)conn->event_handlers.address)->function == WEB_FUNCTION_ONLINE_PLAY)
 		return;
+	coop_change_menus();
 	if (options->strings.count <= CONN_STRING_INDEX || options->strings.count >= WEB_MAXIMUM_STRINGS)
 	{
 		platform_log("web menus: unexpected multiplayer strings");
@@ -629,6 +652,95 @@ static boolean online_play(struct widget_instance *widget, struct event_record *
 	return TRUE;
 }
 
+/* ---------- COOPERATIVE PLAY for two to four */
+
+#define EVENT_HANDLER_OPEN_WIDGET 0x8
+#define EVENT_HANDLER_RUN_FUNCTION 0x80
+
+static void set_handlers(char const *name, long flags, short function, long widget_index)
+{
+	long tag_index = tag_loaded(WEB_UI_WIDGET_DEFINITION_TAG, name);
+	struct web_ui_widget *widget;
+	long index;
+
+	if (tag_index == NONE)
+		return;
+	widget = tag_get(WEB_UI_WIDGET_DEFINITION_TAG, tag_index);
+	for (index = 0; index < widget->event_handlers.count; index++)
+	{
+		struct web_ui_event_handler *handler = (struct web_ui_event_handler *)widget->event_handlers.address + index;
+
+		handler->flags = flags;
+		handler->function = function;
+		handler->widget_tag.index = widget_index;
+	}
+}
+
+/* COOPERATIVE PLAY opens split screen's four-way join screen (and SPLIT
+SCREEN says it is split screen's again) */
+static void coop_change_menus(void)
+{
+	long join_index = tag_loaded(WEB_UI_WIDGET_DEFINITION_TAG, SPLIT_JOIN_SCREEN);
+
+	if (join_index == NONE)
+		return;
+	set_handlers(COOP_ITEM, EVENT_HANDLER_OPEN_WIDGET | EVENT_HANDLER_RUN_FUNCTION, WEB_FUNCTION_COOP_JOIN, join_index);
+	set_handlers(SPLIT_ITEM, EVENT_HANDLER_OPEN_WIDGET | EVENT_HANDLER_RUN_FUNCTION, WEB_FUNCTION_SPLIT_SCREEN_JOIN, join_index);
+}
+
+/* a joined player going on: to the campaign's levels for co-op, else split
+screen's maps, as the map has it */
+static void coop_set_mode(boolean coop)
+{
+	if (coop)
+	{
+		set_handlers(SPLIT_PROFILE_SELECTED, EVENT_HANDLER_OPEN_WIDGET | EVENT_HANDLER_RUN_FUNCTION,
+			WEB_FUNCTION_COOP_START, tag_loaded(WEB_UI_WIDGET_DEFINITION_TAG, SOLO_LEVEL_SELECT));
+	}
+	else
+	{
+		set_handlers(SPLIT_PROFILE_SELECTED, EVENT_HANDLER_OPEN_WIDGET, 0,
+			tag_loaded(WEB_UI_WIDGET_DEFINITION_TAG, SPLIT_MAP_SELECT));
+	}
+}
+
+/* the players who joined, in turn the co-op players: each one's controller,
+and their profile as that co-op player's (as the co-op profile screens set
+them) */
+static boolean coop_start(struct widget_instance *widget, struct event_record *event, boolean *widget_deleted)
+{
+	short controllers[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	short count = 0;
+	short index;
+
+	(void)widget;
+	(void)event;
+	(void)widget_deleted;
+	for (index = 0; index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; index++)
+	{
+		if (player_ui_local_player_wants_to_play_multiplayer(index) &&
+			player_ui_get_active_player_profile_index(index) != NONE)
+		{
+			controllers[count++] = index;
+		}
+	}
+	if (!count)
+		return FALSE;
+	/* (in order: no player's profile is overwritten before it is copied) */
+	for (index = 0; index < count; index++)
+	{
+		struct player_profile profile;
+		long profile_index = player_ui_get_active_player_profile_index(controllers[index]);
+
+		player_ui_get_active_player_profile(controllers[index], &profile);
+		player_ui_set_active_player_profile(index, profile_index, &profile);
+		player_ui_set_single_player_local_player_controller(index, controllers[index]);
+	}
+	player_spawn_count = count;
+	platform_log("web menus: co-op for %d players", count);
+	return TRUE;
+}
+
 /* ---------- DELAY GAME, the host's alone */
 
 /* the pregame screen's button key without X =DELAY GAME where this machine
@@ -721,7 +833,8 @@ static boolean creator_screen_change(struct creator_screen *screen, char const *
 	screen->handlers = widget->event_handlers;
 	screen->children = widget->child_widgets;
 	count = widget->event_handlers.count;
-	memcpy(screen->new_handlers, widget->event_handlers.address, count * sizeof(struct web_ui_event_handler));
+	if (count)
+		memcpy(screen->new_handlers, widget->event_handlers.address, count * sizeof(struct web_ui_event_handler));
 	for (index = 0; index < (long)NUMBEROF(events); index++)
 	{
 		struct web_ui_event_handler *handler = &screen->new_handlers[count++];
@@ -979,6 +1092,14 @@ boolean web_menus_event_function(struct widget_instance *widget, struct event_re
 		return online_play(widget, event, widget_deleted);
 	case WEB_FUNCTION_CREATOR_SAVE:
 		return creator_save(widget, event, widget_deleted);
+	case WEB_FUNCTION_COOP_JOIN:
+		coop_set_mode(TRUE);
+		return ui_widget_event_handler_function_invoke(widget, event, FUNCTION_COOP_GAME_INITIALIZE, widget_deleted);
+	case WEB_FUNCTION_SPLIT_SCREEN_JOIN:
+		coop_set_mode(FALSE);
+		return TRUE;
+	case WEB_FUNCTION_COOP_START:
+		return coop_start(widget, event, widget_deleted);
 	}
 	platform_log("web menus: no function %d", function_index);
 	return FALSE;
@@ -1028,8 +1149,8 @@ own as it starts: web_menus_frame loads the menu again then) */
 boolean web_menus_load_first_screen(void)
 {
 	creator_restore();
-	/* (not for the network tests, which host or join as they start) */
-	if (creator.launched || getenv("HALO_NETWORK_TEST"))
+	/* (not for the network and co-op tests, which start games at once) */
+	if (creator.launched || getenv("HALO_NETWORK_TEST") || getenv("HALO_COOP_TEST"))
 		return FALSE;
 	if (filesystem_check_thread_is_active())
 	{
@@ -1039,6 +1160,38 @@ boolean web_menus_load_first_screen(void)
 	return creator_open();
 }
 
+/* ?HALO_COOP_TEST: the campaign level at once, as the level list's start
+does, with that many players */
+static void coop_test(void)
+{
+	static boolean started;
+	char const *test = getenv("HALO_COOP_TEST");
+	char level[16];
+	char path[64];
+	int players = MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
+	char const *colon;
+	short index;
+
+	if (started || !test || !*test)
+		return;
+	started = TRUE;
+	colon = strchr(test, ':');
+	snprintf(level, sizeof(level), "%.*s", colon ? (int)(colon - test) : (int)strlen(test), test);
+	if (colon)
+		players = atoi(colon + 1);
+	if (players < 1 || players > MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		players = MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
+	snprintf(path, sizeof(path), "levels\\%s\\%s", level, level);
+	platform_log("web menus: co-op test: %s with %d players", path, players);
+	player_spawn_count = (short)players;
+	for (index = 0; index < players; index++)
+		player_ui_set_single_player_local_player_controller(index, index);
+	main_set_difficulty(1);
+	main_set_map_name(path);
+	game_connection_set(0);
+	main_menu_switch_to_single_player();
+}
+
 /* each frame (port/web/src/web_platform.c): the dump once the menus are up */
 void web_menus_frame(void)
 {
@@ -1046,6 +1199,8 @@ void web_menus_frame(void)
 	static int dumped;
 	char const *dump;
 
+	if (frames > 120 && !creator.decide_pending && !filesystem_check_thread_is_active())
+		coop_test();
 	if (creator.decide_pending && !filesystem_check_thread_is_active())
 	{
 		creator.decide_pending = FALSE;

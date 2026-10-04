@@ -4050,30 +4050,41 @@ static boolean solo_level_initialize_list_coop(
 	struct event_record *event,
 	boolean *widget_deleted)
 {
-	struct player_profile profile1;
-	struct player_profile profile0;
-	short highest_levels[2];
-	short highest_difficulties[2];
+	/* port: every co-op player's profile, two to four (the Xbox game's two) */
+	struct player_profile profiles[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	short highest_levels[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	short highest_difficulties[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	short player_count = (short)PIN(player_spawn_count, 2, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS);
 	struct ui_widget_definition *definition;
 
 	memset(single_player_level_data, 0, 0x50);
 	{
-		player_ui_get_active_player_profile(0, &profile0);
-		player_profile_get_highest_completed_solo_level(&profile0, &highest_levels[0], &highest_difficulties[0]);
-		player_ui_get_active_player_profile(1, &profile1);
-		player_profile_get_highest_completed_solo_level(&profile1, &highest_levels[1], &highest_difficulties[1]);
+		short player;
+
+		for (player = 0; player < player_count; player++)
+		{
+			player_ui_get_active_player_profile(player, &profiles[player]);
+			player_profile_get_highest_completed_solo_level(&profiles[player], &highest_levels[player], &highest_difficulties[player]);
+		}
 	}
 	{
 		long level_index;
 
 		for (level_index = 0; level_index < 10; level_index++)
 		{
-			((struct single_player_level_entry *)single_player_level_data)[level_index].map_name = (&event_handler_functions.map_name)[level_index];
-			if (profile0.single_player_map_flags[level_index] || level_index == highest_levels[0] + 1 || profile1.single_player_map_flags[level_index] || level_index == highest_levels[1] + 1 || level_index == 0)
-			{
-				unsigned long level_flags;
+			boolean available = level_index == 0;
+			unsigned long level_flags = 0;
+			short player;
 
-				level_flags = (char)profile0.single_player_map_flags[level_index] | (char)profile1.single_player_map_flags[level_index];
+			for (player = 0; player < player_count; player++)
+			{
+				if (profiles[player].single_player_map_flags[level_index] || level_index == highest_levels[player] + 1)
+					available = TRUE;
+				level_flags |= (char)profiles[player].single_player_map_flags[level_index];
+			}
+			((struct single_player_level_entry *)single_player_level_data)[level_index].map_name = (&event_handler_functions.map_name)[level_index];
+			if (available)
+			{
 				((struct single_player_level_entry *)single_player_level_data)[level_index].unknown5 = (level_flags >> 1) & 1;
 				((struct single_player_level_entry *)single_player_level_data)[level_index].available = TRUE;
 				((struct single_player_level_entry *)single_player_level_data)[level_index].unknown6 = (level_flags >> 2) & 1;
@@ -4198,10 +4209,13 @@ static boolean solo_level_set_next_map_name(
 			result = TRUE;
 		player_ui_remember_player1_profile(0);
 	case 2:
+	/* port: and co-op of three or four */
+	case 3:
+	case 4:
 		{
 			short local_player_index;
 
-			for (local_player_index = 0; local_player_index <= 1; local_player_index++)
+			for (local_player_index = 0; local_player_index < player_spawn_count; local_player_index++)
 			{
 				player_ui_get_active_player_profile(local_player_index, &profile);
 				player_profile_get_highest_completed_solo_level(&profile, &highest_level, &highest_difficulty);

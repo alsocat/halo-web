@@ -58,6 +58,19 @@ games. The page's address sets any setting by its environment name
 `?debug` shows the game's log on screen. The log is always in the browser's
 console.
 
+For tests: `?HALO_COOP_TEST=a10:4` starts a campaign level (`a10`, `b30`,
+...) at once in co-op with that many local players (two to four), each on
+the controller of their number; `?HALO_WEB_DUMP_UI=1` logs every menu widget
+(`game/web_menus.c`, which changes the menus).
+
+## Co-op
+
+COOPERATIVE PLAY takes two to four players on one screen: they join on the
+four-way screen split screen uses (press A or START on each controller, and
+pick a profile), and once one presses A again, the campaign's level list.
+Each player needs a controller of their own; the keyboard and mouse play as
+the first controller's player.
+
 ## Differences from the native builds
 
 - Lens flares do not show: WebGL gives a visibility test's result only
