@@ -39,6 +39,7 @@ session's advertisement as UDP broadcasts.
 #include "interface/player_ui.h"
 #include "interface/ui_widget.h"
 #include "main/main.h"
+#include "objects/objects.h"
 #include "memory/data.h"
 #include "memory/zlib/zlib.h"
 #include "networking/network_game_globals.h"
@@ -248,6 +249,25 @@ void dispose_global_network_game_client(void);
 void dispose_global_network_game_server(void);
 boolean web_lockstep_join(short index);
 void local_player_set_player_index(short local_player_index, long player_index);
+void player_control_new_unit(short local_player_index, long unit_index);
+
+/* an action from another machine, made safe: no number that is not one
+(a machine whose player has no unit yet can aim at nothing) */
+static void action_sanitize(struct player_action *action)
+{
+	real *values[] = { &action->desired_facing.yaw, &action->desired_facing.pitch,
+		&action->throttle.i, &action->throttle.j, &action->primary_trigger };
+	short index;
+
+	for (index = 0; index < (short)NUMBEROF(values); index++)
+	{
+		if (!(*values[index] == *values[index]) || *values[index] > 1.0e6f || *values[index] < -1.0e6f)
+			*values[index] = 0.f;
+	}
+	action->throttle.i = PIN(action->throttle.i, -1.f, 1.f);
+	action->throttle.j = PIN(action->throttle.j, -1.f, 1.f);
+	action->primary_trigger = PIN(action->primary_trigger, 0.f, 1.f);
+}
 
 /* ---------- buffers */
 
@@ -500,6 +520,15 @@ static void members_set_local_players(void)
 		player->local_player_index = NONE;
 		if (member->machine == lockstep.machine)
 			local_player_set_player_index(member->local_player_index, member->player_index);
+	}
+	/* and each local player's controls and camera on its own player's unit
+	(the state given has the other machine's: one's view was another's) */
+	for (local_player_index = 0; local_player_index < MAXIMUM_LOCAL_PLAYERS; local_player_index++)
+	{
+		long player_index = players_globals->local_players[local_player_index];
+		struct player_datum *player = player_index != NONE ? datum_try_and_get(player_data, player_index) : NULL;
+
+		player_control_new_unit(local_player_index, player ? player->unit_index : NONE);
 	}
 }
 
@@ -1551,16 +1580,49 @@ boolean web_lockstep_tick_actions(struct player_action *actions, long count)
 	for (index = 0; index < frame->action_count; index++)
 	{
 		if (frame->player_indices[index] >= 0 && frame->player_indices[index] < count)
+		{
 			actions[frame->player_indices[index]] = frame->actions[index];
+			action_sanitize(&actions[frame->player_indices[index]]);
+		}
 	}
 	player_control_web_apply_action_flags(frame->flags);
 	return TRUE;
+}
+
+static void log_local_players(char const *when)
+{
+	short index;
+
+	for (index = 0; index < lockstep.member_count; index++)
+	{
+		struct lockstep_member *member = &lockstep.members[index];
+		struct player_datum *player = member->player_index != NONE ? datum_try_and_get(player_data, member->player_index) : NULL;
+
+		struct object_datum *unit = player && player->unit_index != NONE ? object_get(player->unit_index) : NULL;
+
+		platform_log("lockstep: %s: member %d (machine %d) player %08lx local %d unit %08lx at %.2f %.2f %.2f deaths %d; local player 0 is %08lx",
+			when, index, member->machine, (unsigned long)member->player_index,
+			player ? player->local_player_index : -9, player ? (unsigned long)player->unit_index : 0xdeadUL,
+			unit ? unit->object.position.x : 0.f, unit ? unit->object.position.y : 0.f, unit ? unit->object.position.z : 0.f,
+			player ? player->statistics.deaths : -1,
+			(unsigned long)players_globals->local_players[0]);
+	}
 }
 
 /* after each tick (game_time.c): the state's hash, every two seconds */
 void web_lockstep_after_tick(void)
 {
 	long tick = game_time_get();
+
+	if (web_lockstep_active() && tick % 1800 == 0)
+		log_local_players("players");
+	/* ?HALO_LOCKSTEP_PARTS=1: each part's checksum too, to find what differs */
+	if (web_lockstep_active() && tick % 30 == 0 && getenv("HALO_LOCKSTEP_PARTS"))
+	{
+		extern void game_state_web_fingerprint(long tick);
+
+		game_state_web_fingerprint(tick);
+	}
 
 	if (!web_lockstep_active() || tick % LOCKSTEP_HASH_PERIOD)
 		return;

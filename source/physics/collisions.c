@@ -398,6 +398,9 @@ boolean collision_test_vector(
 					struct structure_leaf)->cluster_index;
 			}
 			collision->start_location.cluster_index = cluster_index;
+#ifdef HALO_WEB
+			collision->start_location.bonus = 0;
+#endif
 
 			leaf_index = bsp_result.leaf_indices[bsp_result.leaf_count - 1];
 			collision->location.leaf_index = leaf_index;
@@ -413,6 +416,9 @@ boolean collision_test_vector(
 					struct structure_leaf)->cluster_index;
 			}
 			collision->location.cluster_index = cluster_index;
+#ifdef HALO_WEB
+			collision->location.bonus = 0;
+#endif
 		}
 		collision_log_end_time(
 			_collision_function_vector_structure,
@@ -645,6 +651,9 @@ boolean collision_test_pill(
 				struct structure_leaf)->cluster_index;
 		}
 		collision->start_location.cluster_index = cluster_index;
+#ifdef HALO_WEB
+			collision->start_location.bonus = 0;
+#endif
 
 		leaf_index = bsp_result.leaf_indices[bsp_result.leaf_count - 1];
 		collision->location.leaf_index = leaf_index;
@@ -660,6 +669,9 @@ boolean collision_test_pill(
 				struct structure_leaf)->cluster_index;
 		}
 		collision->location.cluster_index = cluster_index;
+#ifdef HALO_WEB
+			collision->location.bonus = 0;
+#endif
 	}
 
 	if (!hit)

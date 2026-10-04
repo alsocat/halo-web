@@ -1895,8 +1895,16 @@ static boolean player_teleport_internal(
 		"c:\\halo\\SOURCE\\game\\players.c",
 		0x4FB,
 		source_unit_index==NONE || local_player_count()>1);
+#ifdef HALO_WEB
+	/* port (online co-op): a teammate on foot too is stood beside, not in
+	(each machine's camera is its own player's: one placed in the other
+	looked out of its face); the places searched are the same on every
+	machine (the game's random numbers) */
+	if (source_unit_index != NONE)
+#else
 	if (source_unit_index != NONE &&
 		object_get_ultimate_parent(source_unit_index) != source_unit_index)
+#endif
 	{
 		long source_root_object_index = object_get_ultimate_parent(source_unit_index);
 		struct object_datum *source_root_object;

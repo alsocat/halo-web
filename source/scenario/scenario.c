@@ -812,6 +812,10 @@ void scenario_location_from_point(
 	}
 
 	location->cluster_index = (short)cluster_index;
+#ifdef HALO_WEB
+	/* (the unused word: else whatever was on the stack, each machine's own) */
+	location->bonus = 0;
+#endif
 
 	return;
 }

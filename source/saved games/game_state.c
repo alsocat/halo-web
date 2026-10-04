@@ -501,6 +501,8 @@ static boolean game_state_web_part_own(
 		"decals", "decal globals", "decal vertices", "structure decals",
 		/* (and what the game's frames move, game_frame_update: the widgets) */
 		"widget", "flag", "antenna",
+		/* (which map areas each light reaches: the lights are each machine's) */
+		"cluster light reference", "light cluster reference",
 		/* (and each machine's local players' own: their HUD, first person
 		weapons, controls and screen effects) */
 		"hud messaging", "hud unit interface", "hud weapon interface", "hud nav points",
