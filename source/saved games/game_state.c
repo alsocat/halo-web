@@ -95,6 +95,8 @@ symbols in this file:
 /* ---------- headers */
 
 #include "cseries.h"
+#include <stdlib.h>
+#include <string.h>
 #include "cseries_windows.h"
 #include "real_math.h"
 #include "console.h"
@@ -105,6 +107,9 @@ symbols in this file:
 #include "scenario.h"
 #include "main.h"
 #include "objects.h"
+#include "memory/data.h"
+#include "cutscene/cinematics.h"
+#include "units/units.h"
 #include "game_sound.h"
 #include "sound_manager.h"
 #include "observer.h"
@@ -147,6 +152,9 @@ static void game_state_allocation_record(
 	const char *type,
 	long size,
 	boolean gpu);
+#ifdef HALO_WEB
+static void game_state_web_record(const char *name, byte *address, long size);
+#endif
 static void game_state_set_revert_time(
 	void);
 
@@ -445,6 +453,275 @@ static boolean game_state_header_valid(
 	return valid;
 }
 
+#ifdef HALO_WEB
+/* the game state's parts, by name, for its fingerprints */
+#define WEB_GAME_STATE_PARTS 256
+
+static struct
+{
+	/* (copied: some parts are named by a string of the moment) */
+	char name[48];
+	byte *address;
+	long size;
+} web_game_state_parts[WEB_GAME_STATE_PARTS];
+static long web_game_state_part_count;
+
+static void game_state_web_record(
+	const char *name,
+	byte *address,
+	long size)
+{
+	if (web_game_state_part_count < WEB_GAME_STATE_PARTS)
+	{
+		snprintf(web_game_state_parts[web_game_state_part_count].name,
+			sizeof(web_game_state_parts[web_game_state_part_count].name), "%s", name ? name : "?");
+		web_game_state_parts[web_game_state_part_count].address = address;
+		web_game_state_parts[web_game_state_part_count].size = size;
+		web_game_state_part_count++;
+	}
+}
+
+void platform_log(const char *format, ...);
+
+/* the game state's parts that are the machine's own, not the game's: what
+it draws and plays (no tick reads them back), what each frame moves rather
+than each tick (game_frame_update: particles, widgets, sounds), and the
+clock's leftover time between ticks; each machine's may differ, and the
+fingerprints leave them out */
+static boolean game_state_web_part_own(
+	const char *name)
+{
+	static const char *const own[] = {
+		"cached object render states", "lights", "lights globals", "light",
+		"decal vertex cache", "particle", "particle systems", "particle system particles",
+		"contrail", "contrail point", "glow", "glow particles", "light volumes", "lightnings",
+		"object looping sounds", "game sound globals", "motion sensor (radar)", "rumble",
+		"screen effect filth", "rasterizer model ambient reflection tint",
+		"decals", "decal globals", "decal vertices", "structure decals",
+		/* (and what the game's frames move, game_frame_update: the widgets) */
+		"widget", "flag", "antenna",
+	};
+	long index;
+
+	for (index = 0; index < (long)NUMBEROF(own); index++)
+	{
+		if (!strcmp(name, own[index]))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* an object's checksum, without what is the machine's own in it: its mark
+(the magic number an object search stamps, from a counter rendering uses
+too), its location's unused word, its attachments in this machine's own
+lights and sounds, its cached render state, and a unit's speech's sound (its index in this machine's sounds) and
+illumination (from the lights, which each frame moves; nothing the game does
+reads it) */
+static void game_state_web_object_checksum(
+	unsigned long *crc,
+	struct object_header_datum *header)
+{
+	byte *datum = (byte *)header->datum;
+	long own[16][2];
+	long own_count = 0;
+	long at = 0;
+	long index;
+
+	own[own_count][0] = offsetof(struct object_datum, object.magic_number);
+	own[own_count++][1] = 4;
+	/* (its location's bonus word, never read: a dropped item's mark, and
+	whatever was on the stack for the locations computed there) */
+	own[own_count][0] = offsetof(struct object_datum, object.location.bonus);
+	own[own_count++][1] = sizeof(word);
+	/* (its attachments in this machine's own lights, sounds, contrails and
+	particle systems, whose slots each frame's updates take and free too) */
+	{
+		struct object_datum *object = (struct object_datum *)datum;
+		long attachment;
+
+		for (attachment = 0; attachment < (long)NUMBEROF(object->object.attachment_indices); attachment++)
+		{
+			if (object->object.attachment_types[attachment] != _object_attachment_type_effect &&
+				object->object.attachment_types[attachment] != (char)NONE)
+			{
+				own[own_count][0] = offsetof(struct object_datum, object.attachment_indices) + attachment * 4;
+				own[own_count++][1] = 4;
+			}
+		}
+	}
+	/* (and its cached render state, which drawing it sets) */
+	own[own_count][0] = offsetof(struct object_datum, object.cached_render_state_index);
+	own[own_count++][1] = 4;
+	if (header->type == _object_type_biped || header->type == _object_type_vehicle)
+	{
+		own[own_count][0] = offsetof(struct unit_datum, unit.ambient_illumination);
+		own[own_count++][1] = 2 * sizeof(real);
+		own[own_count][0] = offsetof(struct unit_datum, unit.speech.impulse_sound_index);
+		own[own_count++][1] = 4;
+	}
+	for (index = 0; index < own_count; index++)
+	{
+		crc_checksum_buffer(crc, datum + at, own[index][0] - at);
+		at = own[index][0] + own[index][1];
+	}
+	crc_checksum_buffer(crc, datum + at, header->data_size - at);
+}
+
+/* a part's checksum, without what is the machine's own in it: the objects'
+marks (the magic number an object search stamps, from a counter rendering
+uses too), the fog's camera point, the clock's leftover time */
+static void game_state_web_part_checksum(
+	unsigned long *crc,
+	long index)
+{
+	const char *name = web_game_state_parts[index].name;
+	byte *address = web_game_state_parts[index].address;
+	long size = web_game_state_parts[index].size;
+
+	if (!strcmp(name, "objects"))
+	{
+		struct data_iterator iterator;
+		struct object_header_datum *header;
+
+		data_iterator_new(&iterator, object_header_data);
+		while ((header = data_iterator_next(&iterator)) != NULL)
+		{
+			crc_checksum_buffer(crc, &header->type, sizeof(header->type));
+			game_state_web_object_checksum(crc, header);
+		}
+	}
+	else if (!strcmp(name, "scenario globals"))
+	{
+		/* (the map's structure; its fog and sound environment are where this
+		machine's camera is) */
+		crc_checksum_buffer(crc, address, offsetof(struct scenario_globals, atmospheric_fog));
+	}
+	else if (!strcmp(name, "effect"))
+	{
+		extern void effects_web_checksum(unsigned long *crc);
+
+		effects_web_checksum(crc);
+	}
+	else if (!strcmp(name, "cinematic globals"))
+	{
+		/* (the letterbox's bars, which drawing them moves) */
+		long after = offsetof(struct cinematic_global_data, show_letterbox);
+
+		crc_checksum_buffer(crc, address + after, size - after);
+	}
+	else if (!strcmp(name, "game time globals"))
+	{
+		crc_checksum_buffer(crc, address, size - (long)sizeof(real));
+	}
+	else
+	{
+		crc_checksum_buffer(crc, address, size);
+	}
+}
+
+/* the game's state's fingerprint (a checksum of what every machine's game
+must have the same), and each part's, to the log (?HALO_LOCKSTEP_TEST: two
+machines' compared) */
+void game_state_web_fingerprint(
+	long tick)
+{
+	static char line[16384];
+	unsigned long whole;
+	long index;
+	int length = 0;
+
+	crc_new(&whole);
+	for (index = 0; index < web_game_state_part_count; index++)
+	{
+		if (!game_state_web_part_own(web_game_state_parts[index].name))
+			game_state_web_part_checksum(&whole, index);
+	}
+	for (index = 0; index < web_game_state_part_count && length < (int)sizeof(line) - 64; index++)
+	{
+		unsigned long part;
+
+		if (game_state_web_part_own(web_game_state_parts[index].name))
+			continue;
+		crc_new(&part);
+		game_state_web_part_checksum(&part, index);
+		length += snprintf(line + length, sizeof(line) - length, " %s=%08lx", web_game_state_parts[index].name, part);
+	}
+	/* ?HALO_LOCKSTEP_DUMP=<tick>: the whole game state at that tick, part by
+	part, to z:\\lockstep_dump.bin, to compare machines' byte by byte */
+	{
+		char const *dump = getenv("HALO_LOCKSTEP_DUMP");
+
+		/* (or several, comma separated: each overwrites the last but the
+		last that differs is what's wanted) */
+		char const *at = dump;
+		boolean wanted = FALSE;
+
+		while (at && *at)
+		{
+			if (atol(at) == tick)
+				wanted = TRUE;
+			at = strchr(at, ',');
+			if (at)
+				at++;
+		}
+		if (dump && wanted)
+		{
+			char dump_path[64];
+			FILE *file;
+
+			snprintf(dump_path, sizeof(dump_path), "z:\\lockstep_dump_%ld.bin", tick);
+			file = fopen(dump_path, "wb");
+
+			if (file)
+			{
+				for (index = 0; index < web_game_state_part_count; index++)
+				{
+					char name[64] = { 0 };
+
+					strncpy(name, web_game_state_parts[index].name, sizeof(name) - 1);
+					unsigned long address = (unsigned long)(size_t)web_game_state_parts[index].address;
+
+					fwrite(name, 1, sizeof(name), file);
+					fwrite(&address, 4, 1, file);
+					fwrite(&web_game_state_parts[index].size, 4, 1, file);
+					fwrite(web_game_state_parts[index].address, 1, web_game_state_parts[index].size, file);
+				}
+				fclose(file);
+				platform_log("lockstep dump %ld written", tick);
+			}
+		}
+	}
+	/* each object's own checksum (its index, definition and checksum), to
+	find which one first differs */
+	{
+		static char objects_line[65536];
+		struct data_iterator iterator;
+		struct object_header_datum *header;
+		int objects_length = 0;
+
+		data_iterator_new(&iterator, object_header_data);
+		while ((header = data_iterator_next(&iterator)) != NULL && objects_length < (int)sizeof(objects_line) - 96)
+		{
+			byte *datum = (byte *)header->datum;
+			unsigned long crc;
+
+			crc_new(&crc);
+			game_state_web_object_checksum(&crc, header);
+			objects_length += snprintf(objects_line + objects_length, sizeof(objects_line) - objects_length,
+				" %ld:%s=%08lx", (long)(iterator.datum_index & 0xFFFF), tag_get_name(*(long *)datum), crc);
+		}
+		platform_log("lockstep objects %ld:%s", tick, objects_line);
+	}
+	{
+		extern long web_tick_local_random_draws;
+
+		platform_log("lockstep draws %ld: %ld", tick, web_tick_local_random_draws);
+	}
+	platform_log("lockstep tick %ld: %08lx", tick, whole);
+	platform_log("lockstep parts %ld:%s", tick, line);
+}
+#endif
+
 static void game_state_allocation_record(
 	const char *name,
 	const char *type,
@@ -494,6 +771,9 @@ void *game_state_malloc(
 
 	pointer = (byte *)game_state_globals.base_address+game_state_globals.cpu_allocation_size;
 	game_state_globals.cpu_allocation_size+= size;
+#ifdef HALO_WEB
+	game_state_web_record(name, pointer, size);
+#endif
 
 	crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &size, sizeof(size));
 
@@ -515,6 +795,9 @@ void *game_state_gpu_malloc(
 
 	game_state_globals.gpu_allocation_size+= size;
 	pointer = (byte *)game_state_globals.base_address-game_state_globals.gpu_allocation_size+GAME_STATE_SIZE;
+#ifdef HALO_WEB
+	game_state_web_record(name, pointer, size);
+#endif
 
 	crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &size, sizeof(size));
 

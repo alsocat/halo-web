@@ -140,9 +140,101 @@ unsigned long *get_global_random_seed_address(
 	return &random_math_globals.global_random_seed;
 }
 
+#ifdef HALO_WEB
+/* port (lockstep play): the game's "local" random numbers, those that need
+not be the same on every machine (its effects, sounds, particles; the
+global seed is the game's), are drawn by the game's ticks too (an effect's
+event times, which then decide what it makes, and when). While the game
+ticks or loads a map they come from a seed of the game state's own, the
+same on every machine from the map's seed on; the rest (rendering, sound
+playing) from the machine's own, as ever, so that no machine's frames
+change its game. */
+static unsigned long *web_tick_local_random_seed;
+static int web_in_game_tick;
+
+void random_math_web_set_tick_seed_address(
+	unsigned long *seed)
+{
+	web_tick_local_random_seed = seed;
+}
+
+void random_math_web_begin_game_tick(
+	void)
+{
+	web_in_game_tick++;
+}
+
+void random_math_web_end_game_tick(
+	void)
+{
+	web_in_game_tick--;
+}
+#endif
+
+#ifdef HALO_WEB
+/* ?HALO_LOCKSTEP_TEST: the ticks' draws counted (game_state_web_fingerprint
+logs them); ?HALO_LOCKSTEP_TRACE=<tick>: where each of that tick's comes
+from, to the browser's console */
+#include <emscripten.h>
+#include <stdlib.h>
+
+long web_tick_local_random_draws;
+
+static void web_trace_tick_draw(
+	void)
+{
+	static long trace_tick = -2;
+	extern long game_time_get(void);
+
+	if (trace_tick == -2)
+	{
+		char const *trace = getenv("HALO_LOCKSTEP_TRACE");
+
+		trace_tick = trace ? atol(trace) : -1;
+	}
+	if (trace_tick >= 0 && game_time_get() >= trace_tick && game_time_get() < trace_tick + 30)
+		emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "lockstep draw %ld", web_tick_local_random_draws);
+}
+#endif
+
+#ifdef HALO_WEB
+/* the machine's own local random numbers, whether the game ticks or not */
+unsigned long *get_machine_local_random_seed_address(
+	void)
+{
+	return &random_math_globals.global_local_random_seed;
+}
+#endif
+
+#ifdef HALO_WEB
+/* within the game's ticks, a part that is the machine's own (an effect's
+particles): its local random numbers the machine's too */
+static int web_machine_scope;
+
+void random_math_web_begin_machine(
+	void)
+{
+	web_machine_scope++;
+}
+
+void random_math_web_end_machine(
+	void)
+{
+	web_machine_scope--;
+}
+#endif
+
 unsigned long *get_global_local_random_seed_address(
 	void)
 {
+#ifdef HALO_WEB
+	if (web_in_game_tick && web_tick_local_random_seed && !web_machine_scope)
+	{
+		web_tick_local_random_draws++;
+		web_trace_tick_draw();
+		return web_tick_local_random_seed;
+	}
+#endif
 	return &random_math_globals.global_local_random_seed;
 }
 

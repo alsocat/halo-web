@@ -297,10 +297,19 @@ void game_initialize(
 	return;
 }
 
+#ifdef HALO_WEB
+void random_math_web_begin_game_tick(void);
+void random_math_web_end_game_tick(void);
+#endif
+
 void game_tick(
 	void)
 {
 	real seconds_per_tick;
+
+#ifdef HALO_WEB
+	random_math_web_begin_game_tick();
+#endif
 
 	profile_tick_start();
 	collision_log_begin_period(0);
@@ -345,6 +354,9 @@ void game_tick(
 	profile_exit(game_update_section);
 	collision_log_end_period();
 	profile_tick_end();
+#ifdef HALO_WEB
+	random_math_web_end_game_tick();
+#endif
 
 	return;
 }
@@ -575,6 +587,12 @@ void game_initialize_for_new_map(
 		!game_globals->active);
 
 	set_random_seed(game_globals->options.random_seed);
+#ifdef HALO_WEB
+	/* the ticks' local random seed, from the map's too (math/random_math.c) */
+	random_math_web_begin_game_tick();
+	*get_global_local_random_seed_address() = game_globals->options.random_seed ^ 0x5EED5EEDUL;
+	random_math_web_end_game_tick();
+#endif
 	game_engine_dispose();
 	game_engine_initialize(&game_variant_global);
 	real_math_reset_precision();

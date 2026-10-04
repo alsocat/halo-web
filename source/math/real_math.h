@@ -1668,6 +1668,10 @@ __inline real_vector3d *random_vector_in_cone3d(
 	return seed_random_vector_in_cone3d(get_global_random_seed_address(), axis, inner_cone_angle, outer_cone_angle, result);
 }
 
+#ifdef HALO_WEB
+unsigned long *get_machine_local_random_seed_address(void);
+#endif
+
 __inline word local_random(
 	void)
 {

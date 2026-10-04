@@ -705,8 +705,75 @@ static boolean update_client_dequeue_distributed(
 	return TRUE;
 }
 
+#ifdef HALO_WEB
+/* ?HALO_LOCKSTEP_TEST=1: every player's action each tick a function of the
+tick alone (walking, turning and firing in turn), whatever the frames, so
+that machines given the same can be compared tick by tick (the game state's
+fingerprints, game_state_web_fingerprint): what lockstep play needs, every
+machine's game the same from the same actions */
+#include <stdlib.h>
+
+boolean web_lockstep_test(
+	void)
+{
+	static int test = -1;
+
+	if (test < 0)
+	{
+		char const *value = getenv("HALO_LOCKSTEP_TEST");
+
+		test = value && *value == '1';
+	}
+	return test;
+}
+
+static void web_lockstep_test_actions(
+	struct player_action *actions)
+{
+	long tick = game_time_get();
+	short index;
+
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
+	{
+		struct player_action *action = &actions[index];
+		long phase = tick / 45 + index;
+
+		csmemset(action, 0, sizeof(*action));
+		action->throttle.i = (real)(phase % 3 - 1);
+		action->throttle.j = (real)((phase / 3) % 3 - 1);
+		action->desired_facing.yaw = (real)((tick * 3 + index * 100) % 628) * 0.01f;
+		action->desired_facing.pitch = (real)((tick / 10) % 21 - 10) * 0.02f;
+		action->primary_trigger = (tick / 20) % 3 == 0 ? 1.0f : 0.0f;
+		action->desired_weapon_index = NONE;
+		action->desired_grenade_index = NONE;
+		action->desired_zoom_level = NONE;
+	}
+}
+
+static boolean update_client_dequeue_queue(
+	struct player_action *actions);
+
 boolean update_client_dequeue(
 	struct player_action *actions)
+{
+	if (web_lockstep_test())
+	{
+		struct player_action queued[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
+
+		/* (the queue goes on as ever, its actions unused) */
+		update_client_dequeue_queue(queued);
+		web_lockstep_test_actions(actions);
+		return TRUE;
+	}
+	return update_client_dequeue_queue(actions);
+}
+
+static boolean update_client_dequeue_queue(
+	struct player_action *actions)
+#else
+boolean update_client_dequeue(
+	struct player_action *actions)
+#endif
 {
 	struct update *update;
 	struct update_client_queue_datum *queue;

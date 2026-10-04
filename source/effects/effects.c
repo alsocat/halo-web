@@ -512,6 +512,10 @@ static void effect_generate_particles(
 static void effect_update(
 	long effect_index,
 	real dt);
+#ifdef HALO_WEB
+void random_math_web_begin_machine(void);
+void random_math_web_end_machine(void);
+#endif
 
 // effect_scale: effect is passed in edx
 static real effect_scale(
@@ -2272,7 +2276,16 @@ static void effect_update(
 
 		if (!TEST_FLAG(flags, _effect_invisible_bit))
 		{
+#ifdef HALO_WEB
+			/* port (lockstep play): an effect that need not be deterministic is
+			visible or not as this machine's players see it, so it is not
+			deleted for it (its slot, and the effects made after it, the
+			game's): it goes on unseen, as a looping one does, to its end */
+			if (TEST_FLAG(flags, _effect_loop_bit) ||
+				!TEST_FLAG(definition->flags, _effect_definition_must_be_deterministic_bit))
+#else
 			if (TEST_FLAG(flags, _effect_loop_bit))
+#endif
 			{
 				effect->header.flags = (word)(flags | FLAG(_effect_invisible_bit));
 			}
@@ -2323,7 +2336,16 @@ static void effect_update(
 			short next_event_index;
 
 			if (!TEST_FLAG(flags, _effect_invisible_bit))
+			{
+#ifdef HALO_WEB
+				/* (the particles are this machine's own: math/random_math.c) */
+				random_math_web_begin_machine();
 				effect_generate_particles(effect);
+				random_math_web_end_machine();
+#else
+				effect_generate_particles(effect);
+#endif
+			}
 
 			if (!event_completed)
 				continue;
@@ -2788,3 +2810,29 @@ static void effect_set_event(
 
 	return;
 }
+
+#ifdef HALO_WEB
+#include "memory/crc.h"
+
+/* the effects' checksum for lockstep play's fingerprints (saved games/
+game_state.c): without what this machine's own sight moves, whether it is
+seen (invisible) and its particles (their counts, the last event fraction
+they were made to) */
+void effects_web_checksum(
+	unsigned long *crc)
+{
+	struct data_iterator iterator;
+	struct effect_datum *effect;
+
+	data_iterator_new(&iterator, effect_data);
+	while ((effect = data_iterator_next(&iterator)) != NULL)
+	{
+		struct effect_datum copy = *effect;
+
+		copy.header.flags &= (word)~FLAG(_effect_invisible_bit);
+		copy.last_event_fraction = 0.f;
+		csmemset(copy.particle_counts, 0, sizeof(copy.particle_counts));
+		crc_checksum_buffer(crc, &copy, sizeof(copy));
+	}
+}
+#endif

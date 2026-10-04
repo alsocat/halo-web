@@ -49,6 +49,17 @@ symbols in this file:
 #include "objects/objects.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
+
+#ifdef HALO_WEB
+/* port (lockstep play): when the scripted camera's move ends, in the game's
+ticks. Its timer counts down with the frames (scripted_camera_update), which
+each machine draws at its own rate, and scripts wait on it (camera_time): a
+script would wake at another tick on each machine. */
+static long camera_script_web_end_tick;
+
+static void camera_script_web_timer_set(
+	void);
+#endif
 #include "tag_files/tag_groups.h"
 
 /* ---------- constants */
@@ -211,6 +222,9 @@ void scripted_camera_set_animation(
 					camera_script_globals.field_of_view = 1.22173047f;
 					camera_script_globals.timer =
 						(real)(animation->frame_count / TICKS_PER_SECOND);
+#ifdef HALO_WEB
+					camera_script_web_timer_set();
+#endif
 					break;
 				}
 
@@ -295,6 +309,9 @@ void scripted_camera_set(
 		camera_script_globals.field_of_view = 1.22173047f;
 	camera_script_globals.relative_object_index = relative_object_index;
 	camera_script_globals.timer = (real)camera_time;
+#ifdef HALO_WEB
+	camera_script_web_timer_set();
+#endif
 
 	director_update(0.f);
 	observer_update(0.0001f);
@@ -328,6 +345,9 @@ void scripted_camera_set_camera_point_relative(
 		camera_script_globals.field_of_view = 1.22173047f;
 	camera_script_globals.timer =
 		(real)((short)transition_time / TICKS_PER_SECOND);
+#ifdef HALO_WEB
+	camera_script_web_timer_set();
+#endif
 	camera_script_globals.relative_object_index = relative_object_index;
 
 	director_update(0.f);
@@ -367,6 +387,11 @@ long scripted_camera_object_relative_to(
 short scripted_camera_time(
 	void)
 {
+#ifdef HALO_WEB
+	/* (the game's ticks to the camera's end, not the frames': scripts wait on
+	it, and the camera moves with each machine's frames) */
+	return (short)MAX(camera_script_web_end_tick - game_time_get(), 0);
+#endif
 	return (short)(camera_script_globals.timer * 30.f);
 }
 
@@ -560,3 +585,11 @@ void scripted_camera_update(
 }
 
 /* ---------- private code */
+
+#ifdef HALO_WEB
+static void camera_script_web_timer_set(
+	void)
+{
+	camera_script_web_end_tick = game_time_get() + (long)(camera_script_globals.timer * 30.f);
+}
+#endif

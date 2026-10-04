@@ -553,6 +553,15 @@ void scripted_sound_new(
 				&position,
 				&forward,
 				scale);
+#ifdef HALO_WEB
+			/* port (lockstep play): the unit speaks the line whether or not this
+			machine's sounds could play it (none free, or not yet loaded): its
+			speech (the AI's and the scripts' waits on it) is the game's */
+			object_type_notify_impulse_sound(
+				source_object_index,
+				definition_index,
+				impulse_sound_index);
+#else
 			if (impulse_sound_index != NONE)
 			{
 				object_type_notify_impulse_sound(
@@ -560,6 +569,7 @@ void scripted_sound_new(
 					definition_index,
 					impulse_sound_index);
 			}
+#endif
 		}
 		else
 		{
@@ -894,6 +904,12 @@ void game_sound_set_mouth_aperture(
 	long object_index,
 	real mouth_aperture)
 {
+#ifdef HALO_WEB
+	/* (the game's ticks move a speaking unit's mouth: units/unit_dialogue.c) */
+	(void)object_index;
+	(void)mouth_aperture;
+	return;
+#endif
 	if (game_looping_sound_data->valid)
 	{
 		if (object_try_and_get_and_verify_type(object_index, _object_mask_unit))

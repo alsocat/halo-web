@@ -80,6 +80,13 @@ symbols in this file:
 
 #define nonuniform_cubic_spline glow_nonuniform_cubic_spline_inline
 #define nonuniform_cubic_spline_vector3d glow_nonuniform_cubic_spline_vector3d_inline
+#ifdef HALO_WEB
+/* port (lockstep play): this file's local random numbers are the machine's
+own, not the game's ticks' (math/random_math.c): what it makes is drawn and
+heard on this machine alone, and how many it draws can depend on what this
+machine draws and plays */
+#define get_global_local_random_seed_address get_machine_local_random_seed_address
+#endif
 #include "objects/widgets/glow.h"
 #undef nonuniform_cubic_spline_vector3d
 #undef nonuniform_cubic_spline

@@ -1408,9 +1408,18 @@ short main_get_window_count(
 	return single_window ? 1 : PIN(local_player_count(), 1, MAXIMUM_WINDOWS);
 }
 
+#ifdef HALO_WEB
+void random_math_web_begin_game_tick(void);
+void random_math_web_end_game_tick(void);
+#endif
+
 static void main_new_map(
 	struct game_options *options)
 {
+#ifdef HALO_WEB
+	/* (the map's objects made as the game ticks: math/random_math.c) */
+	random_math_web_begin_game_tick();
+#endif
 	input_flush();
 	if (game_load(options))
 	{
@@ -1432,6 +1441,9 @@ static void main_new_map(
 	}
 	game_initial_pulse();
 
+#ifdef HALO_WEB
+	random_math_web_end_game_tick();
+#endif
 	main_globals.reset_map = FALSE;
 	main_globals.defer_map_change = FALSE;
 	main_globals.revert_map = FALSE;

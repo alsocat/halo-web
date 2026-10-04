@@ -677,6 +677,53 @@ void unit_speak(
 	return;
 }
 
+#ifdef HALO_WEB
+/* port (lockstep play): a speaking unit's mouth, from the game's ticks.
+The sound manager moved it from the sound it heard playing, each frame
+(game_sound_set_mouth_aperture): how far into the line a machine's sound is
+then, and which of a sound's permutations it plays, are the machine's own,
+and the mouth moves the unit's jaw, the game's. The game's mouth follows
+the line's own mouth data (one value a tick) from when the unit began it:
+its first permutation, then the ones a long line is split into, each after
+the last. (A line of several recordings, chosen at random, shows the
+first's mouth.) */
+static void unit_speech_web_mouth(
+	long unit_index,
+	struct unit_datum *unit)
+{
+	struct sound_definition *definition;
+	struct sound_pitch_range *range;
+	long elapsed;
+	short permutation_index = 0;
+	real aperture = 0.f;
+
+	if (unit->unit.speech.current.sound_definition_index == NONE)
+		return;
+	definition = sound_definition_get(unit->unit.speech.current.sound_definition_index);
+	if (!definition->pitch_ranges.count)
+		return;
+	range = TAG_BLOCK_GET_ELEMENT(&definition->pitch_ranges, 0, struct sound_pitch_range);
+	elapsed = (long)(definition->longest_permutation_length * TICKS_PER_SECOND) / 1000 -
+		unit->unit.speech.sound_timer;
+	while (permutation_index >= 0 && permutation_index < range->permutations.count)
+	{
+		struct sound_permutation *permutation = TAG_BLOCK_GET_ELEMENT(
+			&range->permutations, permutation_index, struct sound_permutation);
+
+		if (elapsed < permutation->mouth_data.size)
+		{
+			if (elapsed >= 0 && permutation->mouth_data.address)
+				aperture = ((byte *)permutation->mouth_data.address)[elapsed] / 255.f;
+			break;
+		}
+		elapsed -= permutation->mouth_data.size;
+		/* (a long line's next part, else the line is over) */
+		permutation_index = TEST_FLAG(definition->flags, 1) ? permutation->next_permutation_index : NONE;
+	}
+	unit_set_mouth_aperture(unit_index, aperture);
+}
+#endif
+
 void unit_notify_impulse_sound(
 	long unit_index,
 	long sound_definition_index,
@@ -1049,6 +1096,10 @@ void unit_dialogue_update(
 			if (unit->unit.speech.ai_delay_timer > 0)
 				unit->unit.speech.ai_delay_timer--;
 
+#ifdef HALO_WEB
+			if (unit->unit.speech.sound_timer > 0)
+				unit_speech_web_mouth(unit_index, unit);
+#endif
 			if (unit->unit.speech.sound_timer > 0)
 			{
 				match_assert(

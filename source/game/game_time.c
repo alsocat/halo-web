@@ -124,6 +124,15 @@ void game_time_initialize(
 {
 	game_time_globals = (struct game_time_globals_struct *)game_state_malloc("game time globals", NULL, sizeof(*game_time_globals));
 	memset(game_time_globals, 0, sizeof(*game_time_globals));
+#ifdef HALO_WEB
+	/* the ticks' local random seed (math/random_math.c) */
+	{
+		extern void random_math_web_set_tick_seed_address(unsigned long *seed);
+
+		random_math_web_set_tick_seed_address(
+			(unsigned long *)game_state_malloc("tick local random seed", NULL, sizeof(unsigned long)));
+	}
+#endif
 
 	return;
 }
@@ -473,6 +482,15 @@ void game_time_update(
 						game_time_globals->local_time++;
 						/* the distributed netcode's per-tick state */
 						network_distributed_tick();
+#ifdef HALO_WEB
+						{
+							extern boolean web_lockstep_test(void);
+							extern void game_state_web_fingerprint(long tick);
+
+							if (web_lockstep_test() && game_time_get() % 30 == 0)
+								game_state_web_fingerprint(game_time_get());
+						}
+#endif
 					}
 				}
 
