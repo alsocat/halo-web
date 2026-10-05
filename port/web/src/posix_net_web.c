@@ -66,7 +66,9 @@ enum
 	MAXIMUM_SOCKETS = 64,
 	MAXIMUM_QUEUED_DATAGRAMS = 128,
 	MAXIMUM_DATAGRAM_SIZE = 1500,
-	STREAM_BUFFER_SIZE = 256 * 1024,
+	/* (a stream's bytes come in as fast as the other end sends: a game state
+	given whole must fit) */
+	STREAM_BUFFER_SIZE = 4 * 1024 * 1024,
 	MAXIMUM_PENDING_CONNECTIONS = 8,
 	FIRST_EPHEMERAL_PORT = 49152,
 	/* the first socket's descriptor */
@@ -723,10 +725,13 @@ int posix_socket_send(int descriptor, const void *buffer, int length, int flags)
 	else
 	{
 		uint32_t connection = socket->connection;
+		uint32_t sent;
 
 		pthread_mutex_unlock(&network_lock);
-		web_net_send_stream(connection, buffer, (uint32_t)length);
-		return succeed(length);
+		sent = web_net_send_stream(connection, buffer, (uint32_t)length);
+		if (sent == 0 && length > 0)
+			return fail(WSAEWOULDBLOCK);
+		return succeed((int)sent);
 	}
 	pthread_mutex_unlock(&network_lock);
 	if (result == 0 && length > 0)

@@ -99,6 +99,17 @@ symbols in this file:
 #define REAL_MATH_EXTERNAL_SIGNED_ANGULAR_DIFFERENCE
 #define REAL_MATH_EXTERNAL_REAL_LOCAL_RANDOM
 #define REAL_MATH_EXTERNAL_REAL_LOCAL_RANDOM_RANGE
+#ifdef HALO_WEB
+/* (the inline ones, which take the machine's seed: above) */
+#undef REAL_MATH_EXTERNAL_REAL_LOCAL_RANDOM
+#undef REAL_MATH_EXTERNAL_REAL_LOCAL_RANDOM_RANGE
+#endif
+#ifdef HALO_WEB
+/* port (lockstep play): the first person weapons are each machine's own
+(its local players'): their idle poses' random numbers are the machine's,
+not the game ticks' (math/random_math.c) */
+#define get_global_local_random_seed_address get_machine_local_random_seed_address
+#endif
 #include "interface/first_person_weapons.h"
 
 #include "cache/predicted_resources.h"

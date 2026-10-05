@@ -2497,7 +2497,7 @@ static void ai_communication_look_secondary_at_unit(
 	long look_unit_index,
 	long prop_index)
 {
-	struct direction_specification direction;
+	struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 	short prop_state;
 
 	if (actor_index != NONE &&
@@ -2549,7 +2549,7 @@ static void ai_communication_look_secondary_at_object(
 	short priority,
 	long object_index)
 {
-	struct direction_specification direction;
+	struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 	if (actor_index != NONE &&
 		priority > 0 &&

@@ -269,6 +269,9 @@ static void action_sanitize(struct player_action *action)
 	action->primary_trigger = PIN(action->primary_trigger, 0.f, 1.f);
 }
 
+/* ?HALO_LOCKSTEP_TRACE=join (math/random_math.c) */
+long web_trace_from_join = -1;
+
 /* ---------- buffers */
 
 static void buffer_reserve(struct lockstep_buffer *buffer, long size)
@@ -1575,6 +1578,8 @@ boolean web_lockstep_tick_actions(struct player_action *actions, long count)
 				}
 			}
 			platform_log("lockstep: player %d added (machine %d) at tick %ld", lockstep.member_count, member->machine, frame->tick);
+			if (getenv("HALO_LOCKSTEP_TRACE") && !strcmp(getenv("HALO_LOCKSTEP_TRACE"), "join"))
+				web_trace_from_join = frame->tick;
 		}
 	}
 	for (index = 0; index < frame->action_count; index++)
@@ -1616,6 +1621,22 @@ void web_lockstep_after_tick(void)
 
 	if (web_lockstep_active() && tick % 1800 == 0)
 		log_local_players("players");
+	/* ?HALO_LOCKSTEP_SEEDS=1: the tick's random seeds, each tick (to find the
+	first that differs) */
+	if (web_lockstep_active() && getenv("HALO_LOCKSTEP_SEEDS"))
+	{
+		extern unsigned long *get_machine_local_random_seed_address(void);
+		extern long web_tick_local_random_draws;
+		extern void random_math_web_begin_game_tick(void);
+		extern void random_math_web_end_game_tick(void);
+		unsigned long *tick_seed;
+
+		random_math_web_begin_game_tick();
+		tick_seed = get_global_local_random_seed_address();
+		web_tick_local_random_draws--;
+		random_math_web_end_game_tick();
+		platform_log("lockstep seeds %ld: tick %08lx global %08lx", tick, *tick_seed, get_random_seed());
+	}
 	/* ?HALO_LOCKSTEP_PARTS=1: each part's checksum too, to find what differs */
 	if (web_lockstep_active() && tick % 30 == 0 && getenv("HALO_LOCKSTEP_PARTS"))
 	{

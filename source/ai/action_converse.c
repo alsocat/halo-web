@@ -206,7 +206,7 @@ void actor_conversation_control(
 	if (actor->external_orders.conversation_index != NONE &&
 		actor->external_orders.conversation_attention_unit_index != NONE)
 	{
-		struct direction_specification direction;
+		struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 		long prop_index = prop_get_active_by_unit_index(
 			actor_index,
 			actor->external_orders.conversation_attention_unit_index);

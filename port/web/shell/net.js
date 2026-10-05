@@ -206,14 +206,39 @@ const HaloNet = (() => {
 
   // ---------- records to the game
 
+  // A datagram that finds the game's ring full is dropped, as a network
+  // would; a connection's records wait, in order, until there is room
+  // (a dropped piece of a stream corrupted it).
+  const backlog = [];
+  let backlogTimer = 0;
+
+  function flushBacklog() {
+    backlogTimer = 0;
+    while (backlog.length && put(backlog[0])) backlog.shift();
+    if (backlog.length) backlogTimer = setTimeout(flushBacklog, 4);
+  }
+
   function deliver(bytes) {
+    const datagram = bytes[2] === 1;
+    if (!datagram && backlog.length) {
+      backlog.push(bytes);
+      return;
+    }
+    if (!put(bytes) && !datagram) {
+      backlog.push(bytes);
+      if (!backlogTimer) backlogTimer = setTimeout(flushBacklog, 4);
+    }
+  }
+
+  function put(bytes) {
     const incoming = ring(2);
     const write = Atomics.load(incoming.write, 0);
-    if (((write - Atomics.load(incoming.read, 0)) >>> 0) >= layout[6]) return;
+    if (((write - Atomics.load(incoming.read, 0)) >>> 0) >= layout[6]) return false;
     const slot = incoming.records + ((write >>> 0) % layout[6]) * layout[7];
     new Uint8Array(memory, slot, bytes.length).set(bytes.subarray(0, layout[7]));
     Atomics.store(incoming.write, 0, (write + 1) | 0);
     Atomics.notify(incoming.write, 0);
+    return true;
   }
 
   // ---------- peers

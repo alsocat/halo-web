@@ -2000,7 +2000,13 @@ static void main_respawn_private(
 			last_respawn_tick = game_time_get();
 			main_globals.respawn_timer++;
 		}
-		if (main_globals.respawn_timer > 90 && players_respawn_coop())
+		boolean respawned;
+
+		/* (the game's: as if in a tick, math/random_math.c) */
+		random_math_web_begin_game_tick();
+		respawned = main_globals.respawn_timer > 90 && players_respawn_coop();
+		random_math_web_end_game_tick();
+		if (respawned)
 #else
 		if (main_globals.respawn_timer++ > 90 && players_respawn_coop())
 #endif

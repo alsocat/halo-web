@@ -21,7 +21,7 @@ void web_net_initialize(void);
 /* the sockets to the bridge */
 void web_net_send_datagram(uint32_t to_address, uint16_t to_port, uint16_t from_port, const void *data, uint32_t size);
 uint32_t web_net_connect(int socket_index, uint32_t to_address, uint16_t to_port, uint16_t from_port);
-void web_net_send_stream(uint32_t connection, const void *data, uint32_t size);
+uint32_t web_net_send_stream(uint32_t connection, const void *data, uint32_t size);
 void web_net_close_connection(uint32_t connection);
 
 /* the bridge to the sockets */

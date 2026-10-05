@@ -81,6 +81,9 @@ heard on this machine alone, and how many it draws can depend on what this
 machine draws and plays */
 #define get_global_local_random_seed_address get_machine_local_random_seed_address
 #endif
+#ifdef HALO_WEB
+int web_lockstep_active(void);
+#endif
 #include "effects/particles.h"
 
 #include "bitmaps/bitmap_group.h"
@@ -402,6 +405,13 @@ static void particle_effect_new(
 	velocity.j = particle->translational_velocity.j * (1.0f / TICKS_PER_SECOND);
 	velocity.k = particle->translational_velocity.k * (1.0f / TICKS_PER_SECOND);
 
+#ifdef HALO_WEB
+	/* port (online co-op): a particle is this machine's alone (its frames
+	move it), and an effect it makes would take a place among the game's
+	effects, which every machine must have the same: none is made */
+	if (group_tag == EFFECT_DEFINITION_TAG && web_lockstep_active())
+		return;
+#endif
 	if (group_tag == EFFECT_DEFINITION_TAG)
 	{
 		real_point3d marker_points[NUMBER_OF_PARTICLE_EFFECT_MARKERS];
@@ -693,6 +703,9 @@ static boolean particle_update_physics(
 					}
 
 					if (definition->collision_material_effects.index != NONE &&
+#ifdef HALO_WEB
+						!web_lockstep_active() &&
+#endif
 						material_effect_visible(&particle->position))
 					{
 						material_effect_new(

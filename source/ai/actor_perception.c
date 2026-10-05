@@ -3951,7 +3951,7 @@ void prop_status_refresh(
 			previous_quantized_speed <= 1 &&
 			prop->quantized_speed > 1)
 		{
-			struct direction_specification direction;
+			struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 			direction.type = _direction_specification_prop;
 			direction.prop_index = prop_index;
@@ -5186,7 +5186,7 @@ static void actor_perception_refresh_danger_zone(
 
 	if (perceived && !actor->danger_zone.currently_perceived)
 	{
-		struct direction_specification direction;
+		struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 		direction.type = _direction_specification_danger;
 		actor_look_secondary(

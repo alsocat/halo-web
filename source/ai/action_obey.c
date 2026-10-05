@@ -1852,7 +1852,7 @@ static boolean action_obey_command_begin(
 					look_unit_index != NONE ||
 					(look_point_index >= 0 && look_point_index < command_list->points.count)))
 				{
-					struct direction_specification direction;
+					struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 					short priority = _secondary_look_priority_default;
 
 					if (command->atom_modifier == _ai_atom_look_modifier_idle_turn_around)

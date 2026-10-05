@@ -528,7 +528,7 @@ void actor_stimulus_weapon_impact(
 	}
 
 	{
-		struct direction_specification direction;
+		struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 		direction.type = _direction_specification_point;
 		direction.point = *position;
@@ -599,7 +599,7 @@ void actor_stimulus_weapon_detonation(
 	}
 
 	{
-		struct direction_specification direction;
+		struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 		direction.type = _direction_specification_point;
 		direction.point = *position;
@@ -624,7 +624,7 @@ void actor_stimulus_damage(
 	real_vector3d const *surprise_vector = NULL;
 	boolean have_recoil_direction = FALSE;
 	real_vector3d recoil_direction;
-	struct direction_specification direction;
+	struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 	if (prop_index != NONE)
 	{
@@ -784,7 +784,7 @@ void actor_stimulus_prop_acknowledged(
 	if (!prop->dead)
 	{
 		{
-			struct direction_specification direction;
+			struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 			direction.type = _direction_specification_prop;
 			direction.prop_index = prop_index;
@@ -936,7 +936,7 @@ void actor_stimulus_bumped(
 	long actor_index,
 	long prop_index)
 {
-	struct direction_specification direction;
+	struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 	direction.type = _direction_specification_prop;
 	direction.prop_index = prop_index;
@@ -956,7 +956,7 @@ void actor_stimulus_environmental_noise(
 	short count)
 {
 	struct actor_datum *actor = actor_get(actor_index);
-	struct direction_specification direction;
+	struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 	if (actor->state.mode == _actor_mode_asleep)
 	{
@@ -1024,7 +1024,7 @@ void actor_stimulus_heard_shooting(
 	}
 
 	{
-		struct direction_specification direction;
+		struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 		direction.type = _direction_specification_prop;
 		direction.prop_index = prop_index;

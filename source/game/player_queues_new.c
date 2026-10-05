@@ -775,35 +775,25 @@ void update_client_web_local_action(
 }
 
 /* online co-op's tick: every player's action from the session's frame,
-through the queues' latches as ever */
+with the button latches the queues keep (kept here for every player: a
+level started alone has one queue, and players who join later have none,
+so their actions were whatever was on the stack) */
 static boolean update_client_dequeue_lockstep(
 	struct player_action *actions)
 {
+	static unsigned long latched_control_flags[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
 	struct player_action frame[HALO_PORT_MAXIMUM_NETWORK_PLAYERS];
-	struct update_client_queue_datum *queue = (struct update_client_queue_datum *)update_client_globals.queues->data;
-	short queue_index;
+	short index;
 
 	if (!web_lockstep_tick_actions(frame, HALO_PORT_MAXIMUM_NETWORK_PLAYERS))
 		return FALSE;
-	for (queue_index = 0; queue_index < update_client_globals.queues->count; ++queue_index, ++queue)
+	for (index = 0; index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; index++)
 	{
-		struct player_action action = frame[queue_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS ? queue_index : 0];
+		struct player_action action = frame[index];
 
-		if (queue_index >= HALO_PORT_MAXIMUM_NETWORK_PLAYERS)
-		{
-			csmemset(&action, 0, sizeof(action));
-			action.desired_weapon_index = NONE;
-			action.desired_grenade_index = NONE;
-			action.desired_zoom_level = NONE;
-		}
-		actions[queue_index].control_flags = action.control_flags & ~queue->latched_control_flags;
-		queue->latched_control_flags = action.control_flags & LATCHED_CONTROL_FLAGS;
-		actions[queue_index].desired_facing = action.desired_facing;
-		actions[queue_index].throttle = action.throttle;
-		actions[queue_index].primary_trigger = action.primary_trigger;
-		actions[queue_index].desired_weapon_index = action.desired_weapon_index;
-		actions[queue_index].desired_grenade_index = action.desired_grenade_index;
-		actions[queue_index].desired_zoom_level = action.desired_zoom_level;
+		actions[index] = action;
+		actions[index].control_flags = action.control_flags & ~latched_control_flags[index];
+		latched_control_flags[index] = action.control_flags & LATCHED_CONTROL_FLAGS;
 	}
 	update_client_globals.next_update_number_to_dequeue += 1;
 	return TRUE;

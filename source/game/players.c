@@ -1920,7 +1920,14 @@ static boolean player_teleport_internal(
 		best_adjustment_vector = source_root_object->object.translational_velocity;
 		best_adjustment_vector.k = 0.f;
 		source_unit_index = source_root_object_index;
+#ifdef HALO_WEB
+		/* port: a direction only from real movement (a teammate on foot
+		standing still has a velocity too small to normalize: NaN, which
+		placed the player nowhere) */
+		if (!(magnitude_squared3d(&best_adjustment_vector) > 0.01f))
+#else
 		if (!(magnitude_squared3d(&best_adjustment_vector) > 0.f))
+#endif
 		{
 			if (source_root_object->object.forward.k < 0.70710677f)
 			{
@@ -1932,6 +1939,10 @@ static boolean player_teleport_internal(
 			}
 		}
 		best_adjustment_vector.k = 0.f;
+#ifdef HALO_WEB
+		if (!(magnitude_squared3d(&best_adjustment_vector) > 0.0001f))
+			best_adjustment_vector = *global_forward3d;
+#endif
 
 		collision_radius = biped_definition_get(biped->definition_index)->biped.collision_radius;
 		scale = collision_radius * 3.f + source_root_object->object.bounding_sphere_radius;

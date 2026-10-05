@@ -186,12 +186,17 @@ static void web_trace_tick_draw(
 	static long trace_tick = -2;
 	extern long game_time_get(void);
 
+	extern long web_trace_from_join;
+
 	if (trace_tick == -2)
 	{
 		char const *trace = getenv("HALO_LOCKSTEP_TRACE");
 
 		trace_tick = trace ? atol(trace) : -1;
 	}
+	/* (?HALO_LOCKSTEP_TRACE=join: from the tick a player joins) */
+	if (web_trace_from_join >= 0)
+		trace_tick = web_trace_from_join;
 	if (trace_tick >= 0 && game_time_get() >= trace_tick && game_time_get() < trace_tick + 30)
 		emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "lockstep draw %ld", web_tick_local_random_draws);
 }

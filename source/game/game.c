@@ -300,6 +300,8 @@ void game_initialize(
 #ifdef HALO_WEB
 void random_math_web_begin_game_tick(void);
 void random_math_web_end_game_tick(void);
+void random_math_web_begin_machine(void);
+void random_math_web_end_machine(void);
 #endif
 
 void game_tick(
@@ -339,8 +341,18 @@ void game_tick(
 		: 1.0f / TICKS_PER_SECOND;
 	effects_update(seconds_per_tick);
 	lock_global_random_seed();
+#ifdef HALO_WEB
+	/* port (lockstep play): rumble and the first person weapons are each
+	machine's own (its local players'): their random numbers (an animation's
+	permutation) the machine's (math/random_math.c) */
+	random_math_web_begin_machine();
 	rumble_update();
 	first_person_weapons_update();
+	random_math_web_end_machine();
+#else
+	rumble_update();
+	first_person_weapons_update();
+#endif
 	unlock_global_random_seed();
 	game_engine_update();
 	editor_update();

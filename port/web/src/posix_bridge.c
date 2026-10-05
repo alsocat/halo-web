@@ -23,6 +23,8 @@ Each record is a slot of RECORD_SIZE bytes:
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdbool.h>
+
 #include "web_net.h"
 
 enum
@@ -95,7 +97,7 @@ uint32_t web_net_broadcast_address(void)
 
 /* ---------- the rings */
 
-static void ring_put(enum record_type type, uint32_t address, uint32_t connection, uint16_t from_port, uint16_t to_port,
+static bool ring_put(enum record_type type, uint32_t address, uint32_t connection, uint16_t from_port, uint16_t to_port,
 	const void *payload, uint32_t size)
 {
 	struct ring *ring = &web_network.outgoing;
@@ -108,9 +110,10 @@ static void ring_put(enum record_type type, uint32_t address, uint32_t connectio
 	write = __atomic_load_n(&ring->write, __ATOMIC_ACQUIRE);
 	if (write - __atomic_load_n(&ring->read, __ATOMIC_ACQUIRE) >= RING_RECORDS)
 	{
-		/* the page is not taking them: drop, as a network would */
+		/* the page is not taking them: a datagram is dropped, as a network
+		would; a stream's sender is told to try again (web_net_send_stream) */
 		pthread_mutex_unlock(&bridge_lock);
-		return;
+		return false;
 	}
 	record = ring->records[write % RING_RECORDS];
 	record[0] = (uint8_t)size;
@@ -127,6 +130,7 @@ static void ring_put(enum record_type type, uint32_t address, uint32_t connectio
 	pthread_mutex_unlock(&bridge_lock);
 	/* the page waits on the count */
 	emscripten_futex_wake(&ring->write, 1);
+	return true;
 }
 
 /* ---------- connections */
@@ -186,7 +190,9 @@ uint32_t web_net_connect(int socket_index, uint32_t to_address, uint16_t to_port
 	return identifier;
 }
 
-void web_net_send_stream(uint32_t identifier, const void *data, uint32_t size)
+/* the bytes of a connection's stream the bridge took (all but what would
+not fit: the rest is the sender's to send again, as a full TCP window's) */
+uint32_t web_net_send_stream(uint32_t identifier, const void *data, uint32_t size)
 {
 	struct connection *connection;
 	uint32_t address;
@@ -197,13 +203,15 @@ void web_net_send_stream(uint32_t identifier, const void *data, uint32_t size)
 	address = connection ? connection->address : 0;
 	pthread_mutex_unlock(&bridge_lock);
 	if (!address)
-		return;
+		return size;
 	for (offset = 0; offset < size; offset += MAXIMUM_PAYLOAD)
 	{
 		uint32_t count = size - offset < MAXIMUM_PAYLOAD ? size - offset : MAXIMUM_PAYLOAD;
 
-		ring_put(_record_stream, address, identifier, 0, 0, (const uint8_t *)data + offset, count);
+		if (!ring_put(_record_stream, address, identifier, 0, 0, (const uint8_t *)data + offset, count))
+			return offset;
 	}
+	return size;
 }
 
 void web_net_close_connection(uint32_t identifier)

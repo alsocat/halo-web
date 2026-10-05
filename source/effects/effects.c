@@ -512,7 +512,26 @@ static void effect_generate_particles(
 static void effect_update(
 	long effect_index,
 	real dt);
+
+/* port (online co-op): an effect on a local player's first person weapon
+gets that weapon's markers' locations too, so the machine whose player holds
+it made more of the effect than the others (its parts, objects, random
+numbers): in a session no effect is a local player's */
+static short effect_web_first_person_local_index(
+	long object_index)
+{
 #ifdef HALO_WEB
+	extern boolean web_lockstep_active(void);
+
+	if (web_lockstep_active())
+		return NONE;
+#endif
+	return first_person_weapon_get_local_index(object_index);
+}
+#ifdef HALO_WEB
+boolean web_lockstep_active(void);
+#include <emscripten.h>
+#include <stdlib.h>
 void random_math_web_begin_machine(void);
 void random_math_web_end_machine(void);
 #endif
@@ -907,7 +926,7 @@ long effect_new_from_object(
 
 		effect->object_index = object_index;
 		effect->local_player_index =
-			first_person_weapon_get_local_index(object_index);
+			effect_web_first_person_local_index(object_index);
 
 		if (effects_corpse_nonviolent &&
 			effects_object_is_corpse(effect->object_index))
@@ -969,7 +988,7 @@ long effect_new_looping(
 
 		effect->object_index = object_index;
 		effect->local_player_index =
-			first_person_weapon_get_local_index(object_index);
+			effect_web_first_person_local_index(object_index);
 		effect->scale_a_function_index = scale_a_function_index;
 		effect->scale_b_function_index = scale_b_function_index;
 		effect->change_color_index = change_color_index;
@@ -1512,6 +1531,15 @@ static long effect_allocate(
 				}
 			}
 
+#ifdef HALO_WEB
+			if (effect_index == NONE)
+			{
+				char const *watch = getenv("HALO_LOCKSTEP_EFFECTS");
+
+				if (watch && game_time_get() >= atol(watch) && game_time_get() < atol(watch) + 60)
+					emscripten_log(EM_LOG_CONSOLE, "lockstep effect full %ld (%d live) %s", game_time_get(), effect_data->actual_count, tag_get_name(definition_index));
+			}
+#endif
 			if (effect_index != NONE)
 			{
 				struct effect_datum *effect = effect_get(effect_index);
@@ -1520,6 +1548,19 @@ static long effect_allocate(
 				effect->owner_object_index = owner_object_index;
 				effect->local_player_index = NONE;
 				effect->header.flags = 0;
+#ifdef HALO_WEB
+				{
+					/* ?HALO_LOCKSTEP_EFFECTS=<tick>: the effects made from then (a
+					second), and where from, to the browser's console */
+					char const *watch = getenv("HALO_LOCKSTEP_EFFECTS");
+
+					if (watch && game_time_get() >= atol(watch) && game_time_get() < atol(watch) + 60)
+					{
+						emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "lockstep effect %ld #%ld %s",
+							game_time_get(), effect_index & 0xffff, tag_get_name(definition_index));
+					}
+				}
+#endif
 
 				effect_set_event(effect_index, 0);
 			}
@@ -2266,6 +2307,12 @@ static void effect_update(
 		visible = TEST_FLAG(
 			definition->flags,
 			_effect_definition_must_be_deterministic_bit)
+#ifdef HALO_WEB
+			/* port (online co-op): whether any of the session's players may
+			see it, not this machine's alone, so that every machine makes the
+			same of it (its parts: more effects, lights, decals) */
+			|| web_lockstep_active()
+#endif
 			? scenario_location_potentially_visible(&effect->location)
 			: scenario_location_potentially_visible_local(&effect->location);
 	}
@@ -2431,7 +2478,9 @@ static void effect_update(
 			}
 
 			if (!TEST_FLAG(effect->header.flags, _effect_invisible_bit))
+			{
 				effect_generate_parts(effect);
+			}
 		}
 	}
 

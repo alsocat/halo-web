@@ -1431,7 +1431,7 @@ void actor_look_update(
 		if (actor_combat_currently_firing_burst(actor_index) &&
 			!actor->orders.combat.abort_burst)
 		{
-			struct direction_specification temporary_direction;
+			struct direction_specification temporary_direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 			temporary_direction.type = _direction_specification_target;
 			if (actor_look_decode_direction(actor_index, &temporary_direction, &primary_vector))

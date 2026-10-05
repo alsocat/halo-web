@@ -4299,7 +4299,7 @@ void ai_scripting_look_at_object(
 
 		if (actor_index != NONE)
 		{
-			struct direction_specification direction;
+			struct direction_specification direction = { 0 }; /* (port: whole, its union's unused words too) */
 
 			direction.type = _direction_specification_object;
 			direction.object_index = object_index;
