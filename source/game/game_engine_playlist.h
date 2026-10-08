@@ -69,5 +69,9 @@ struct game_variant *build_game_variant_team_king(
 	struct game_variant *variant);
 struct game_variant *build_game_variant_team_slayer(
 	struct game_variant *variant);
+#ifdef HALO_WEB
+struct game_variant *build_game_variant_quick_snipe(
+	struct game_variant *variant);
+#endif
 
 #endif // __GAME_ENGINE_PLAYLIST_H

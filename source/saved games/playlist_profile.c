@@ -95,7 +95,12 @@ enum
 {
 	PLAYLIST_PROFILE_CHECKSUM_DATA_SIZE = 104,
 	MAXIMUM_GAME_VARIANT_NAME_LENGTH = 12,
+#ifdef HALO_WEB
+	/* the game's 26 and the site's Quick Snipe */
+	NUMBER_OF_DEFAULT_PLAYLIST_PROFILES = 27,
+#else
 	NUMBER_OF_DEFAULT_PLAYLIST_PROFILES = 26,
+#endif
 };
 
 enum
@@ -117,6 +122,7 @@ struct playlist_profile_data
 };
 #pragma pack(pop)
 
+#ifndef HALO_WEB
 typedef char verify_playlist_profile_building_functions_size[
 	sizeof(((struct playlist_profile_data *)0)->
 		default_variant_building_functions) == 0x68 ? 1 : -1];
@@ -124,6 +130,7 @@ typedef char verify_playlist_profile_first_time_offset[
 	offsetof(struct playlist_profile_data, first_time) == 0x68 ? 1 : -1];
 typedef char verify_playlist_profile_data_size[
 	sizeof(struct playlist_profile_data) == 0x69 ? 1 : -1];
+#endif
 
 struct playlist_profile_write_request
 {
@@ -203,6 +210,9 @@ static struct playlist_profile_data playlist_profile_default_data =
 		build_game_variant_team_oddball,
 		build_game_variant_team_king,
 		build_game_variant_team_slayer,
+#ifdef HALO_WEB
+		build_game_variant_quick_snipe,
+#endif
 	},
 	TRUE
 };

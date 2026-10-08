@@ -197,12 +197,33 @@ static wchar_t *const fallback_multiplayer_game_text_strings[] =
 typedef char fallback_multiplayer_game_text_string_count_check[
 	NUMBEROF(fallback_multiplayer_game_text_strings) == 184 - FIRST_FALLBACK_MULTIPLAYER_GAME_TEXT_STRING ? 1 : -1];
 
+#ifdef HALO_WEB
+/* the site's default game variant after the game's 26
+(saved games/playlist_profile.c): its name, and its description after the
+10 custom game types' and the 26's */
+#define DEFAULT_GAME_VARIANT_NAMES_TAG_NAME "ui\\default_multiplayer_game_setting_names"
+#define GAME_VARIANT_DESCRIPTIONS_TAG_NAME "ui\\shell\\strings\\game_variant_descriptions"
+#define QUICK_SNIPE_VARIANT_INDEX 26
+#endif
+
 /* the built-in string for a string list too short to hold string_index,
 or NULL */
 static wchar_t *fallback_string(long tag_index, short string_index)
 {
 	short fallback_index = string_index - FIRST_FALLBACK_MULTIPLAYER_GAME_TEXT_STRING;
 
+#ifdef HALO_WEB
+	if (string_index == QUICK_SNIPE_VARIANT_INDEX &&
+		!csstrcasecmp(tag_get_name(tag_index), DEFAULT_GAME_VARIANT_NAMES_TAG_NAME))
+	{
+		return L"Quick Snipe";
+	}
+	if (string_index == QUICK_SNIPE_VARIANT_INDEX + 10 &&
+		!csstrcasecmp(tag_get_name(tag_index), GAME_VARIANT_DESCRIPTIONS_TAG_NAME))
+	{
+		return L"Everybody has\r\nsniper weapons,\r\nand respawns are\r\nalways quick.\r\n15 kills to win.";
+	}
+#endif
 	if (fallback_index < 0 ||
 		fallback_index >= (short)NUMBEROF(fallback_multiplayer_game_text_strings) ||
 		csstrcasecmp(tag_get_name(tag_index), MULTIPLAYER_GAME_TEXT_TAG_NAME))

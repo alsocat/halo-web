@@ -5453,6 +5453,18 @@ struct game_variant *build_game_variant_snipers(
 	return variant;
 }
 
+#ifdef HALO_WEB
+/* the site's: Snipers without its respawn time growth */
+struct game_variant *build_game_variant_quick_snipe(
+	struct game_variant *variant)
+{
+	build_game_variant_snipers(variant);
+	variant->universal_variant.respawn_time_growth = 0;
+
+	return variant;
+}
+#endif
+
 struct game_variant *build_game_variant_oddball(
 	struct game_variant *variant)
 {
