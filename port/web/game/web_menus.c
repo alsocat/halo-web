@@ -27,6 +27,11 @@ The creator: on the site's first visit (no player profile yet) the game opens
 on a short profile screen (name, colour, save) with the name being typed,
 then the main menu; the profile is the player's from then on.
 
+LAYTON HOUSE: a 14th multiplayer map, the site's own (maps/layton.map:
+interface/ui_widget_event_handler_functions.c lists it). The menus name and
+picture a map they do not know as "Unknown Level", the 14th of their names
+and pictures; that one is Layton House's, with its description added.
+
 ?HALO_COOP_TEST=<level>[:<players>] (a10, b30, ...) starts that campaign
 level as soon as the menus are up, cooperative with that many local players
 (4 by default), each on the controller of their number.
@@ -54,6 +59,8 @@ the map of the menus the changes below are made against.
 
 #include <stdlib.h>
 #include <string.h>
+
+#include "layton_picture.h"
 
 void platform_log(const char *format, ...);
 void memory_watch_prepare_write(void *address, unsigned long size);
@@ -135,6 +142,7 @@ typedef char web_ui_child_size_check[sizeof(struct web_ui_child) == 0x50 ? 1 : -
 
 static void string_text(long string_list_index, short string_index, char *text, int size);
 static void coop_change_menus(void);
+static void layton_change_menus(void);
 static boolean make_online_games_title(void);
 
 /* ---------- the changes */
@@ -231,6 +239,7 @@ static void apply_changes(void)
 	if (conn->event_handlers.count && ((struct web_ui_event_handler *)conn->event_handlers.address)->function == WEB_FUNCTION_ONLINE_PLAY)
 		return;
 	coop_change_menus();
+	layton_change_menus();
 	if (options->strings.count <= CONN_STRING_INDEX || options->strings.count >= WEB_MAXIMUM_STRINGS)
 	{
 		platform_log("web menus: unexpected multiplayer strings");
@@ -599,6 +608,76 @@ static void place_online_games_title(void)
 		memcpy(bitmap->base_address, online_games_title.pixels, TITLE_SIZE);
 		/* (uploaded again before it is next drawn) */
 		memory_watch_prepare_write(bitmap->base_address, TITLE_SIZE);
+	}
+}
+
+/* ---------- LAYTON HOUSE */
+
+#define MAP_NAMES "ui\\shell\\main_menu\\mp_map_list"
+#define MAP_DESCRIPTIONS MULTIPLAYER_SCREEN "mp_map_select\\map_data"
+#define MAP_PICTURES "ui\\shell\\bitmaps\\mp_map_grafix"
+#define MAP_PICTURE_WIDTH 256
+#define MAP_PICTURE_HEIGHT 128
+#define MAP_PICTURE_FORMAT_DXT1 14
+
+enum
+{
+	/* the game's "Unknown Level" */
+	LAYTON_INDEX = 13
+};
+
+static wchar_t layton_name[] = L"Layton House";
+static wchar_t layton_description[] = L"Home Sweet Home\r\nLayton, Utah\r\n\r\n2-12 players\r\n\r\nSupports vehicles";
+static struct string_list_entry map_descriptions[LAYTON_INDEX + 1];
+
+static void layton_change_menus(void)
+{
+	long names_index = tag_loaded(UNICODE_STRING_LIST_TAG, MAP_NAMES);
+	long descriptions_index = tag_loaded(UNICODE_STRING_LIST_TAG, MAP_DESCRIPTIONS);
+
+	if (names_index != NONE)
+	{
+		struct string_list *names = tag_get(UNICODE_STRING_LIST_TAG, names_index);
+
+		if (names->strings.count > LAYTON_INDEX)
+			set_string((struct string_list_entry *)names->strings.address + LAYTON_INDEX, layton_name);
+	}
+	if (descriptions_index != NONE)
+	{
+		struct string_list *descriptions = tag_get(UNICODE_STRING_LIST_TAG, descriptions_index);
+
+		if (descriptions->strings.count == LAYTON_INDEX)
+		{
+			memcpy(map_descriptions, descriptions->strings.address, LAYTON_INDEX * sizeof(struct string_list_entry));
+			set_string(&map_descriptions[LAYTON_INDEX], layton_description);
+			descriptions->strings.address = map_descriptions;
+			descriptions->strings.count++;
+		}
+	}
+}
+
+/* its picture, as the texture cache has it (as ONLINE GAMES' title) */
+static void place_layton_picture(void)
+{
+	long tag_index = tag_loaded(BITMAP_GROUP_TAG, MAP_PICTURES);
+	struct bitmap_group *group;
+	struct bitmap_data *bitmap;
+
+	if (tag_index == NONE)
+		return;
+	group = bitmap_group_get(tag_index);
+	if (group->bitmaps.count <= LAYTON_INDEX)
+		return;
+	bitmap = (struct bitmap_data *)group->bitmaps.address + LAYTON_INDEX;
+	if (bitmap->width != MAP_PICTURE_WIDTH || bitmap->height != MAP_PICTURE_HEIGHT ||
+		bitmap->format != MAP_PICTURE_FORMAT_DXT1 || bitmap->pixels_size != sizeof(layton_picture))
+	{
+		return;
+	}
+	if (bitmap->base_address && memcmp(bitmap->base_address, layton_picture, sizeof(layton_picture)))
+	{
+		memcpy(bitmap->base_address, layton_picture, sizeof(layton_picture));
+		memory_watch_prepare_write(bitmap->base_address, sizeof(layton_picture));
 	}
 }
 
@@ -1307,6 +1386,7 @@ void web_menus_frame(void)
 		main_screen_shell_load();
 	}
 	place_online_games_title();
+	place_layton_picture();
 	online_games_list_coop();
 	/* (the ui.map is loaded again on returning from a game) */
 	if (frames++ % 15 == 0)

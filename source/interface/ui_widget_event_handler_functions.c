@@ -990,6 +990,14 @@ struct game_variant_data
 	byte data[0x68];
 };
 
+/* the game's 13 multiplayer levels; the site's Layton House is a 14th
+(port/web/game/web_menus.c names it in the menus) */
+#ifdef HALO_WEB
+#define NUMBER_OF_MULTIPLAYER_LEVELS 14
+#else
+#define NUMBER_OF_MULTIPLAYER_LEVELS 13
+#endif
+
 #pragma pack(push, 2)
 struct event_handler_globals
 {
@@ -1001,7 +1009,7 @@ struct event_handler_globals
 	char *single_player_levels[9];
 	long last_player1_profile_index;
 	long unknown3C;
-	char *multiplayer_levels[13];
+	char *multiplayer_levels[NUMBER_OF_MULTIPLAYER_LEVELS];
 	short unknown74;
 };
 #pragma pack(pop)
@@ -1751,6 +1759,9 @@ struct event_handler_globals event_handler_functions =
 		"levels\\test\\wizard\\wizard",
 		"levels\\test\\putput\\putput",
 		"levels\\test\\longest\\longest",
+#ifdef HALO_WEB
+		"levels\\test\\layton\\layton",
+#endif
 	},
 	NONE
 };
@@ -2965,7 +2976,7 @@ static boolean multiplayer_level_list_initialize(
 {
 	char map_name[256];
 	struct ui_widget_definition *definition = ui_widget_definition_get(widget->definition_tag_index);
-	short level_count = 13;
+	short level_count = NUMBER_OF_MULTIPLAYER_LEVELS;
 
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1228,
 		definition->type == 2,
@@ -5579,7 +5590,7 @@ static boolean multiplayer_level_select(
 		"expected 3 list items for 'multiplayer level list' widget");
 	level_list = widget->child->child;
 	match_vassert("c:\\halo\\SOURCE\\interface\\ui_widget_event_handler_functions.c", 1298,
-		level_list->data3C.selected_index >= 0 && level_list->data3C.selected_index < 13,
+		level_list->data3C.selected_index >= 0 && level_list->data3C.selected_index < NUMBER_OF_MULTIPLAYER_LEVELS,
 		"invalid multiplayer level specified from 'multiplayer level list' list widget");
 	map_name = event_handler_functions.multiplayer_levels[level_list->data3C.selected_index];
 	file = fopen("d:\\map_automation.txt", "r");
@@ -5610,7 +5621,7 @@ static boolean multiplayer_level_select(
 		if (server)
 			network_game_server_change_map_name(server, map_name);
 	}
-	for (level_index = 0; level_index < 13; level_index++)
+	for (level_index = 0; level_index < NUMBER_OF_MULTIPLAYER_LEVELS; level_index++)
 	{
 		if (!_stricmp(map_name, event_handler_functions.multiplayer_levels[level_index]))
 		{
